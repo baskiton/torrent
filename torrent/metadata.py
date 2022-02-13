@@ -1,5 +1,7 @@
 import pathlib
 
+from typing import List
+
 
 class TorrentMetadata:
     def __init__(self, metadata: dict):
@@ -11,8 +13,7 @@ class TorrentMetadata:
         return self.raw_metadata[b'announce'].decode('utf8')
 
     @property
-    def announce_list(self):
-        # list[list[bytes]]
+    def announce_list(self) -> List[List[bytes]]:
         return self.raw_metadata.get(b'announce-list')
 
     @property
@@ -59,7 +60,7 @@ class TorrentMetadata:
 
 class MetadataInfo:
     def __init__(self, pieces: bytes, pieces_length: int, private: int,
-                 name: pathlib.Path, files: list['MetadataFile'], total_size: int):
+                 name: pathlib.Path, files: List['MetadataFile'], total_size: int):
         # common
         self.pieces = pieces
         self.pieces_length = pieces_length
