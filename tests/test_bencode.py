@@ -34,7 +34,7 @@ class TestBencode(ut.TestCase):
             j = random.randint(1, 1000)
             s = secrets.token_bytes(j).replace(b':', b'\0')
             y = b'%i%s' % (j, s)
-            with self.assertRaises(ValueError, msg=y):
+            with self.assertRaises((ValueError, EOFError), msg=y):
                 bencode.decode_from_buffer(y)
 
     def test_bytes_fail_key(self):
