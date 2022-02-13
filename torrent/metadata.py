@@ -11,7 +11,8 @@ class TorrentMetadata:
         return self.raw_metadata[b'announce'].decode('utf8')
 
     @property
-    def announce_list(self) -> list[list[bytes]]:
+    def announce_list(self):
+        # list[list[bytes]]
         return self.raw_metadata.get(b'announce-list')
 
     @property
