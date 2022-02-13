@@ -1,4 +1,5 @@
 import random
+import secrets
 import unittest as ut
 
 from torrent import bencode
@@ -17,7 +18,7 @@ class TestBencode(ut.TestCase):
     def test_bytes(self):
         for i in range(1000):
             j = random.randint(0, 1000)
-            s = random.randbytes(j)
+            s = secrets.token_bytes(j)
             y = b'%i:%s' % (j, s)
             z = bencode.decode_from_buffer(y)
             self.assertEqual(s, z, msg=y)
@@ -31,7 +32,7 @@ class TestBencode(ut.TestCase):
     def test_bytes_fail_val(self):
         for i in range(1000):
             j = random.randint(1, 1000)
-            s = random.randbytes(j).replace(b':', b'\0')
+            s = secrets.token_bytes(j).replace(b':', b'\0')
             y = b'%i%s' % (j, s)
             with self.assertRaises(ValueError, msg=y):
                 bencode.decode_from_buffer(y)
