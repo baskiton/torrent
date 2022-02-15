@@ -5,78 +5,107 @@ import unittest as ut
 from torrent import metadata
 
 
-info0_file_content = b'hello, world!\n'
-info0_piece_len = 4
-info0_file_expect = metadata.MetadataFile(pathlib.Path('abc.txt'), len(info0_file_content), hashlib.md5(info0_file_content).digest())
-info0_expect = metadata.MetadataInfo(
-    pieces=b''.join(hashlib.sha1(info0_file_content[i:i+info0_piece_len]).digest()
-                    for i in range(0, len(info0_file_content), info0_piece_len)),
-    pieces_length=info0_piece_len,
-    private=1,
-    name=pathlib.Path(),
-    files=[info0_file_expect],
-    total_size=info0_file_expect.length
-)
-
-info1_file0_content = b'Hey yo!\n test string and blah blah blah\n'
-info1_file0_expect = metadata.MetadataFile(pathlib.Path('def.txt'), len(info1_file0_content))
-info1_file1_content = b'Hey yo2!\n lah blah blah'
-info1_file1_expect = metadata.MetadataFile(pathlib.Path('def/ghi.txt'), len(info1_file1_content), hashlib.md5(info1_file1_content).digest())
-info1_piece_len = 8
-info1_expect = metadata.MetadataInfo(
-    pieces=b''.join(hashlib.sha1(f[i:i+info1_piece_len]).digest()
-                    for f in (info1_file0_content, info1_file1_content)
-                    for i in range(0, len(f), info1_piece_len)),
-    pieces_length=info1_piece_len,
-    private=0,
-    name=pathlib.Path('abc'),
-    files=[
-        info1_file0_expect,
-        info1_file1_expect,
-    ],
-    total_size=info1_file0_expect.length + info1_file1_expect.length,
-)
-
-info = (
-    {
-        b'pieces': info0_expect.pieces,
-        b'piece length': info0_expect.pieces_length,
-        b'private': info0_expect.private,
-        b'name': info0_file_expect.path.as_posix().encode(),
-        b'length': info0_file_expect.length,
-        b'md5sum': info0_file_expect.md5sum,
-    },
-    {
-        b'pieces': info1_expect.pieces,
-        b'piece length': info1_expect.pieces_length,
-        b'name': info0_file_expect.path.as_posix().encode(),
-        b'files': [
-            {
-                b'path': list(s.encode() for s in info1_expect.files[0].path.parts),
-                b'length': info1_expect.files[0].length,
-            },
-            {
-                b'path': list(s.encode() for s in info1_expect.files[1].path.parts),
-                b'length': info1_expect.files[1].length,
-                b'md5sum': info1_expect.files[1].md5sum,
-            }
-        ]
-    },
-)
-
-
 class TestMetadata(ut.TestCase):
     # TODO
     pass
 
 
 class TestMetadataInfo(ut.TestCase):
-    # TODO
+    def setUp(self):
+        _piece_len = 4
+
+        _file0_content = b'hello, world!\n'
+        _file0 = {
+            'content': _file0_content,
+            'path': pathlib.Path('abc.txt'),
+            'length': len(_file0_content),
+            'md5sum': hashlib.md5(_file0_content).digest(),
+        }
+        _file1_content = b'Hey yo!\n test string and blah blah blah\n'
+        _file1 = {
+            'content': _file1_content,
+            'path': pathlib.Path('def.txt'),
+            'length': len(_file1_content),
+            'md5sum': None,
+        }
+        _file2_content = b'Hey yo2!\n lah blah blah'
+        _file2 = {
+            'content': _file2_content,
+            'path': pathlib.Path('def/ghi.txt'),
+            'length': len(_file2_content),
+            'md5sum': hashlib.md5(_file2_content).digest(),
+        }
+        _info0_pieces = b''.join(hashlib.sha1(_file0_content[i:i+_piece_len]).digest()
+                                 for i in range(0, len(_file0_content), _piece_len))
+        _info0_hashes = tuple(_info0_pieces[i:i + 20] for i in range(0, len(_info0_pieces), 20))
+        _info1_pieces = b''.join(hashlib.sha1(f[i:i+_piece_len]).digest()
+                                 for f in (_file1_content, _file2_content)
+                                 for i in range(0, len(f), _piece_len))
+        _info1_hashes = tuple(_info1_pieces[i:i + 20] for i in range(0, len(_info1_pieces), 20))
+        self._expected_info = (
+            {
+                'pieces': _info0_pieces,
+                'piece_length': _piece_len,
+                'private': 1,
+                'name': pathlib.Path(),
+                'files': [_file0],
+                'total_size': _file0['length'],
+                'hashes': _info0_hashes,
+                'pieces_amount': len(_info0_hashes),
+            },
+            {
+                'pieces': _info1_pieces,
+                'piece_length': _piece_len,
+                'private': 0,
+                'name': pathlib.Path('abc'),
+                'files': [_file1, _file2],
+                'total_size': _file1['length'] + _file2['length'],
+                'hashes': _info1_hashes,
+                'pieces_amount': len(_info1_hashes),
+            },
+        )
+        self._raw_info = (
+            {
+                b'pieces': _info0_pieces,
+                b'piece length': _piece_len,
+                b'private': 1,
+                b'name': str(_file0['path']).encode(),
+                b'length': _file0['length'],
+                b'md5sum': _file0['md5sum'],
+            },
+            {
+                b'pieces': _info1_pieces,
+                b'piece length': _piece_len,
+                b'name': b'abc',
+                b'files': [
+                    {
+                        b'path': [p.encode() for p in _file1['path'].parts],
+                        b'length': _file1['length'],
+                    },
+                    {
+                        b'path': [p.encode() for p in _file2['path'].parts],
+                        b'length': _file2['length'],
+                        b'md5sum': _file2['md5sum'],
+                    },
+                ],
+            },
+        )
+
     def test_raw_data(self):
-        for i in info:
-            z = metadata.MetadataInfo.from_rawdata(i, 'utf8')
+        for i in range(len(self._raw_info)):
+            raw = self._raw_info[i]
+            exp = self._expected_info[i]
+            info = metadata.MetadataInfo.from_rawdata(raw, 'utf8')
 
-
-class TestMetadataFile(ut.TestCase):
-    # TODO
-    pass
+            self.assertEqual(info.pieces, exp['pieces'])
+            self.assertEqual(info.piece_length, exp['piece_length'])
+            self.assertEqual(info.private, exp['private'])
+            self.assertEqual(info.name, exp['name'])
+            self.assertEqual(info.total_size, exp['total_size'])
+            self.assertEqual(info.hashes, exp['hashes'])
+            self.assertEqual(info.pieces_amount, exp['pieces_amount'])
+            files = exp['files']
+            for k in range(len(files)):
+                self.assertEqual(info.files[k].path, files[k]['path'])
+                self.assertEqual(info.files[k].length, files[k]['length'])
+                self.assertEqual(info.files[k].md5sum, files[k]['md5sum'])

@@ -6,12 +6,28 @@ from torrent import bencode
 
 
 class TestBencode(ut.TestCase):
+    def setUp(self):
+        self._int_fixture = (
+            -1 << 63,       # min int64_t
+            -1000,
+            '-001000',
+            -1,
+            '-001',
+            0,
+            '000',
+            1,
+            '001',
+            1000,
+            '001000',
+            (1 << 63) - 1,  # max int64_t
+        )
+
     def test_int(self):
-        for i in range(-10000, 10000):
-            self.assertEqual(i, bencode.decode_from_buffer(f'i{i}e'.encode()), msg=i)
+        for i in self._int_fixture:
+            self.assertEqual(int(i), bencode.decode_from_buffer(f'i{i}e'.encode()), msg=i)
 
     def test_int_fail(self):
-        for i in range(-10000, 10000):
+        for i in self._int_fixture:
             with self.assertRaises(EOFError, msg=i):
                 bencode.decode_from_buffer(f'i{i}'.encode())
 

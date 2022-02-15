@@ -59,11 +59,11 @@ class TorrentMetadata:
 
 
 class MetadataInfo:
-    def __init__(self, pieces: bytes, pieces_length: int, private: int,
+    def __init__(self, pieces: bytes, piece_length: int, private: int,
                  name: pathlib.Path, files: List['MetadataFile'], total_size: int):
         # common
         self.pieces = pieces
-        self.pieces_length = pieces_length
+        self.piece_length = piece_length
         self.private = private
 
         self.name = name
@@ -95,7 +95,7 @@ class MetadataInfo:
                 path = pathlib.Path(*map(lambda s: s.decode(encoding), f_info.get(b'path')))
                 sz = int(f_info.get(b'length'))
                 total_size += sz
-                files.append(MetadataFile(path, sz, info.get(b'md5sum')))
+                files.append(MetadataFile(path, sz, f_info.get(b'md5sum')))
 
         return cls(pieces, piece_length, private, name, files, total_size)
 
