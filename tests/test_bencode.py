@@ -159,6 +159,7 @@ class TestBencode(ut.TestCase):
             ({'dig': -123}, b'd3:digi-123ee'),
             ({'dict': {'list': []}}, b'd4:dictd4:listleee'),
             ({'dict': {'dict': {'dict': {'dict': dict()}}}}, b'd4:dictd4:dictd4:dictd4:dictdeeeee'),
+            ({'a': 1, 'c': 3, 'e': 5, 'd': 4, 'b': 2}, b'd1:ai1e1:bi2e1:ci3e1:di4e1:ei5ee'),
         )
         for a, exp in x:
             to = io.BytesIO()

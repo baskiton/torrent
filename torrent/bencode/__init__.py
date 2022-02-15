@@ -108,9 +108,10 @@ def _encode_list(x: Iterable, to: io.BytesIO):
 
 def _encode_dict(x: Mapping, to: io.BytesIO):
     to.write(_DICT)
-    for key, val in x.items():
+    # keys of dictionary must be sorted by lexicography
+    for key in sorted(x):
         _encode_buffer(key, to)
-        _encode(val, to)
+        _encode(x[key], to)
     to.write(_END)
 
 
