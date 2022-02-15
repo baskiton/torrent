@@ -1,3 +1,4 @@
+import hashlib
 import pathlib
 
 from typing import List
@@ -5,62 +6,33 @@ from typing import List
 
 class TorrentMetadata:
     def __init__(self, metadata: dict):
-        self.raw_metadata = metadata
+        self.announce: str = metadata[b'announce'].decode('utf8')
+        self.announce_list: List[List[bytes]] = metadata.get(b'announce-list')
+        x = metadata.get(b'comment')
+        if x is not None:
+            x = x.decode('utf8')
+        self.comment: str = x
+        x = metadata.get(b'created by')
+        if x is not None:
+            x = x.decode('utf8')
+        self.created_by: str = x
+        x = metadata.get(b'creation date')
+        self.creation_date: int = x and int(x)
+        self.encoding: str = metadata.get(b'encoding', b'utf8').decode('utf8')
+        x = metadata.get(b'publisher')
+        if x is not None:
+            x = x.decode('utf8')
+        self.publisher: str = x
+        x = metadata.get(b'publisher-url')
+        if x is not None:
+            x = x.decode('utf8')
+        self.publisher_url: str = x
         self.info = MetadataInfo.from_rawdata(metadata.get(b'info'), self.encoding)
-
-    @property
-    def announce(self) -> str:
-        return self.raw_metadata[b'announce'].decode('utf8')
-
-    @property
-    def announce_list(self) -> List[List[bytes]]:
-        return self.raw_metadata.get(b'announce-list')
-
-    @property
-    def comment(self) -> str:
-        x = self.raw_metadata.get(b'comment')
-        if x is not None:
-            x = x.decode('utf8')
-        return x
-
-    @property
-    def created_by(self) -> str:
-        x = self.raw_metadata.get(b'created by')
-        if x is not None:
-            x = x.decode('utf8')
-        return x
-
-    @property
-    def creation_date(self) -> int:
-        dt = self.raw_metadata.get(b'creation date')
-        return dt and int(dt)
-
-    @property
-    def encoding(self) -> str:
-        return self.raw_metadata.get(b'encoding', b'utf8').decode('utf8')
-
-    @property
-    def publisher(self) -> str:
-        x = self.raw_metadata.get(b'publisher')
-        if x is not None:
-            x = x.decode('utf8')
-        return x
-
-    @property
-    def publisher_url(self) -> str:
-        x = self.raw_metadata.get(b'publisher-url')
-        if x is not None:
-            x = x.decode('utf8')
-        return x
-
-    @property
-    def _xxx(self):
-        return self.raw_metadata.get(b'_xxx')
 
 
 class MetadataInfo:
     def __init__(self, pieces: bytes, piece_length: int, private: int,
-                 name: pathlib.Path, files: List['MetadataFile'], total_size: int):
+                 name: pathlib.Path, files: List['MetadataFile'], total_size: int, info_hash: bytes = None):
         # common
         self.pieces = pieces
         self.piece_length = piece_length
@@ -73,6 +45,7 @@ class MetadataInfo:
         # additional
         self.hashes = tuple(pieces[i:i+20] for i in range(0, len(pieces), 20))
         self.pieces_amount = len(self.hashes)   # math.ceil(total_size / pieces_length)
+        self.info_hash = info_hash
 
     @classmethod
     def from_rawdata(cls, info: dict, encoding):
@@ -106,5 +79,5 @@ class MetadataFile:
         self.length = length
         self.md5sum = md5sum
 
-    def __repr__(self):
-        return f'MetadataFile<{self.path}; {self.length} bytes; md5={self.md5sum}>'
+    # def __repr__(self):
+    #     return f'MetadataFile<{self.path}; {self.length} bytes; md5={self.md5sum}>'

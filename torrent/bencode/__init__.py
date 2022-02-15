@@ -1,7 +1,8 @@
 import io
+import pathlib
 import string
 
-from typing import BinaryIO, Union
+from typing import Any, AnyStr, Iterable, Mapping
 
 _INT = b'i'
 _LIST = b'l'
@@ -21,7 +22,7 @@ def _decode_int(stream: io.BytesIO) -> int:
     return int(i)
 
 
-def _decode_bytes(stream: io.BytesIO) -> bytes:
+def _decode_buffer(stream: io.BytesIO) -> bytes:
     stream.seek(-1, io.SEEK_CUR)
     sz = b''
     _ = stream.read(1)
@@ -65,19 +66,69 @@ _TYPES = {
     _DICT: _decode_dict,
     _END: _decode_end,
 }
-_TYPES.update({i.encode(): _decode_bytes for i in string.digits})
+_TYPES.update({i.encode(): _decode_buffer for i in string.digits})
 
 
-def _decode(stream: Union[io.BytesIO, BinaryIO]):
+def _decode(stream: io.BytesIO):
     t = stream.read(1)
     res = _TYPES[t](stream)
     return res
 
 
-def decode_from_file(fname: str):
-    with open(fname, 'rb') as f:
-        return _decode(f)
+def decode_from_file(fname: pathlib.Path):
+    return _decode(io.BytesIO(fname.read_bytes()))
 
 
 def decode_from_buffer(buf: bytes):
     return _decode(io.BytesIO(buf))
+
+
+def _encode_int(x: int, to: io.BytesIO):
+    to.write(_INT)
+    to.write(str(int(x)).encode())
+    to.write(_END)
+
+
+def _encode_buffer(x: AnyStr, to: io.BytesIO):
+    if isinstance(x, str):
+        x = x.encode()
+    elif not isinstance(x, bytes):
+        raise TypeError(f'Expected a `str` or `bytes`, got `{type(x)}` instead.')
+    to.write(str(len(x)).encode())
+    to.write(_SEP)
+    to.write(x)
+
+
+def _encode_list(x: Iterable, to: io.BytesIO):
+    to.write(_LIST)
+    for i in x:
+        _encode(i, to)
+    to.write(_END)
+
+
+def _encode_dict(x: Mapping, to: io.BytesIO):
+    to.write(_DICT)
+    for key, val in x.items():
+        _encode_buffer(key, to)
+        _encode(val, to)
+    to.write(_END)
+
+
+def _encode(item: Any, to: io.BytesIO):
+    if isinstance(item, int):
+        _encode_int(item, to)
+    elif isinstance(item, (bytes, str)):
+        _encode_buffer(item, to)
+    elif isinstance(item, Mapping):
+        _encode_dict(item, to)
+    elif isinstance(item, Iterable):
+        _encode_list(item, to)
+    else:
+        raise TypeError(f'`{type(item)}` is not bencodable')
+
+
+def encode(data, out: io.BytesIO = None) -> io.BytesIO:
+    if out is None:
+        out = io.BytesIO()
+    _encode(data, out)
+    return out
