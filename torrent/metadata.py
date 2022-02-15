@@ -3,6 +3,8 @@ import pathlib
 
 from typing import List
 
+from torrent import bencode
+
 
 class TorrentMetadata:
     def __init__(self, metadata: dict):
@@ -32,7 +34,7 @@ class TorrentMetadata:
 
 class MetadataInfo:
     def __init__(self, pieces: bytes, piece_length: int, private: int,
-                 name: pathlib.Path, files: List['MetadataFile'], total_size: int, info_hash: bytes = None):
+                 name: pathlib.Path, files: List['MetadataFile'], total_size: int, info_hash: bytes):
         # common
         self.pieces = pieces
         self.piece_length = piece_length
@@ -57,20 +59,23 @@ class MetadataInfo:
         name = pathlib.Path(info.get(b'name').decode(encoding))
         files = []
         total_size = 0
+        info_hash = hashlib.sha1(bencode.encode(info).getbuffer()).digest()
 
         length = info.get(b'length')
         if length is not None:
+            # single file mode
             files.append(MetadataFile(name, int(length), info.get(b'md5sum')))
             name = pathlib.Path()
             total_size = length
         else:
+            # multiple file mode
             for f_info in info.get(b'files', ()):
                 path = pathlib.Path(*map(lambda s: s.decode(encoding), f_info.get(b'path')))
                 sz = int(f_info.get(b'length'))
                 total_size += sz
                 files.append(MetadataFile(path, sz, f_info.get(b'md5sum')))
 
-        return cls(pieces, piece_length, private, name, files, total_size)
+        return cls(pieces, piece_length, private, name, files, total_size, info_hash)
 
 
 class MetadataFile:
