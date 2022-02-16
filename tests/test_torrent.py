@@ -10,4 +10,6 @@ class TestTorrent(ut.TestCase):
         for p in glob.iglob('tests/files/*.torrent'):
             fn = pathlib.Path(p)
 
-            self.assertTrue(torrent.Torrent.from_file(fn), msg=f'"{fn}"')
+            t = torrent.Torrent.from_file(fn)
+            self.assertTrue(t, msg=f'"{fn}"')
+            self.assertEqual(t.metadata.info.info_hash, t.info_hash)
