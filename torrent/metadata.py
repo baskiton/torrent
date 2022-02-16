@@ -1,7 +1,7 @@
 import hashlib
 import pathlib
 
-from typing import List
+from typing import List, Optional
 
 from torrent import bencode
 
@@ -9,7 +9,7 @@ from torrent import bencode
 class TorrentMetadata:
     def __init__(self, metadata: dict):
         self.announce: str = metadata[b'announce'].decode('utf8')
-        self.announce_list: List[List[bytes]] = metadata.get(b'announce-list')
+        self.announce_list: Optional[List[List[bytes]]] = metadata.get(b'announce-list')
         x = metadata.get(b'comment')
         if x is not None:
             x = x.decode('utf8')
@@ -42,9 +42,9 @@ class MetadataInfo:
 
         self.name = name
         self.files = files
-        self.total_size = total_size
 
         # additional
+        self.total_size = total_size
         self.hashes = tuple(pieces[i:i+20] for i in range(0, len(pieces), 20))
         self.pieces_amount = len(self.hashes)   # math.ceil(total_size / pieces_length)
         self.info_hash = info_hash

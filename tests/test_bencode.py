@@ -1,3 +1,4 @@
+import glob
 import io
 import pathlib
 import random
@@ -97,9 +98,10 @@ class TestBencode(ut.TestCase):
         self.assertDictEqual(z, y, msg=z)
 
     def test_decode_file(self):
-        fn = pathlib.Path('tests/files/test_0.torrent')
-        z = bencode.decode_from_file(fn)
-        self.assertTrue(z, fn)
+        for p in glob.iglob('tests/files/*.torrent'):
+            fn = pathlib.Path(p)
+            z = bencode.decode_from_file(fn)
+            self.assertTrue(z, msg=f'"{fn}"')
 
     def test_encode_int(self):
         x = (
