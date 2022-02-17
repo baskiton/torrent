@@ -1,4 +1,4 @@
-__all__ = 'bencode', 'metadata', 'Peer', 'Torrent', 'Tracker'
+__all__ = '__version__', 'bencode', 'metadata', 'Peer', 'Torrent', 'Tracker'
 __version__ = '0.0.1'
 
 from .peer import Peer

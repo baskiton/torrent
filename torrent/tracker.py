@@ -2,6 +2,7 @@ import enum
 import random
 import secrets
 import struct
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -53,10 +54,11 @@ class Tracker:
         if self.torrent.metadata.announce_list:
             for lvl in self.torrent.metadata.announce_list:
                 for idx, url in enumerate(lvl):
-                    result = self._send_request(event, url)
+                    result = self._send_request(event, url.decode('utf8'))
                     if result:
                         lvl.pop(idx)
                         lvl.insert(0, url)
+                        self.last_connecting_time = time.time()
                         return result
         else:
             return self._send_request(event, self.torrent.metadata.announce)
@@ -85,7 +87,7 @@ class Tracker:
             }
             return transport.tracker.http_request(u, requests_keys)
 
-        raise ValueError(f'Unsupported url schema: {u.geturl()}')
+        raise ValueError(f'Unsupported url scheme: {u.geturl()}')
 
     def _peers_compact_parse(self, peers: bytes):
         for ip, port in struct.iter_unpack('!IH', peers):
