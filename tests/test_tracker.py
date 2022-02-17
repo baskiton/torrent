@@ -5,7 +5,8 @@ import unittest as ut
 import torrent
 
 
-class MyTestCase(ut.TestCase):
+class TestTracker(ut.TestCase):
+
     @classmethod
     def setUpClass(cls):
         cls._urls = (

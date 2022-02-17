@@ -57,9 +57,9 @@ class TestBencode(ut.TestCase):
             with self.assertRaises((ValueError, EOFError), msg=y):
                 bencode.decode_from_buffer(y)
 
-    def test_decode_buffer_fail_key(self):
+    def test_decode_buffer_fail(self):
         x = b':' + b'ololo'
-        with self.assertRaises(KeyError, msg=x):
+        with self.assertRaises(ValueError, msg=x):
             bencode.decode_from_buffer(x)
 
     def test_decode_list(self):
@@ -96,6 +96,10 @@ class TestBencode(ut.TestCase):
         z = bencode.decode_from_buffer(x)
 
         self.assertDictEqual(z, y, msg=z)
+
+    def test_decode_fail(self):
+        with self.assertRaises(ValueError):
+            bencode.decode_from_buffer(b'hello world')
 
     def test_decode_file(self):
         for p in glob.iglob('tests/files/*.torrent'):

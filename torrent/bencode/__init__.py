@@ -71,7 +71,10 @@ _TYPES.update({i.encode(): _decode_buffer for i in string.digits})
 
 def _decode(stream: io.BytesIO):
     t = stream.read(1)
-    res = _TYPES[t](stream)
+    try:
+        res = _TYPES[t](stream)
+    except KeyError:
+        raise ValueError('Gotten data is not bencode')
     return res
 
 

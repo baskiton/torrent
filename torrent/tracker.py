@@ -1,11 +1,14 @@
 import enum
 import random
 import secrets
+import struct
+import urllib.error
 import urllib.parse
+import urllib.request
 
-from typing import Any, AnyStr
+from typing import Any, AnyStr, Dict, List
 
-from torrent import Torrent, __version__
+from torrent import Peer, Torrent, transport
 
 
 @enum.unique
@@ -20,10 +23,11 @@ class Tracker:
         self.torrent = torrent
         self.interval = 0
         self.last_connecting_time = 0
+        self.peers: Dict[int, Peer] = {}
 
         # tracker requests keys
         # self.info_hash
-        self.peer_id = f'-PB{int(__version__.replace(".", "")[:4]):04}-'.encode() + secrets.token_bytes(12)
+        self.peer_id = f'-bPB-'.encode() + secrets.token_bytes(11)
         self.port = 6881    # 6881-6889
         # self.ip =
         self.numwant = 30
@@ -35,7 +39,15 @@ class Tracker:
                 random.shuffle(lvl)
 
     def get_peers(self):
-        peers = self._announce(_TrackerEvent.STARTED)
+        response = self._announce(_TrackerEvent.STARTED)
+        if isinstance(response, dict):
+            peers = response.get(b'peers')
+            if isinstance(peers, bytes):
+                # compact model
+                self._peers_compact_parse(peers)
+            elif isinstance(peers, list):
+                # dictionary model
+                self._peers_dict_parse(peers)
 
     def _announce(self, event: _TrackerEvent) -> Any:
         if self.torrent.metadata.announce_list:
@@ -50,23 +62,39 @@ class Tracker:
             return self._send_request(event, self.torrent.metadata.announce)
 
     def _send_request(self, event: _TrackerEvent, url: AnyStr) -> Any:
-        requests_keys = {
-            'info_hash': self.torrent.info_hash,
-            'peer_id': self.peer_id,
-            'port': self.port,
-            'uploaded': self.torrent.uploaded,
-            'downloaded': self.torrent.downloaded,
-            'left': self.torrent.left,
-            'compact': 1,
-        }
         u = urllib.parse.urlparse(url)
         if u.scheme == 'udp':
+            #TODO:
             # using UDP Tracker Protocol
             # BEP15: http://bittorrent.org/beps/bep_0015.html
-            raise NotImplementedError
+            return transport.tracker.udp_request(u)
+
         elif u.scheme in ('http', 'https'):
             # using HTTP GET
             # BEP3: http://bittorrent.org/beps/bep_0003.html
-            raise NotImplementedError
-        else:
-            raise ValueError(f'Unsupported url schema: {u.geturl()}')
+            requests_keys = {
+                'info_hash': self.torrent.info_hash,
+                'peer_id': self.peer_id,
+                'port': self.port,
+                'uploaded': self.torrent.uploaded,
+                'downloaded': self.torrent.downloaded,
+                'left': self.torrent.left,
+                'compact': 1,
+                'numwant': self.numwant,
+                'event': event,
+            }
+            return transport.tracker.http_request(u, requests_keys)
+
+        raise ValueError(f'Unsupported url schema: {u.geturl()}')
+
+    def _peers_compact_parse(self, peers: bytes):
+        for ip, port in struct.iter_unpack('!IH', peers):
+            p = Peer(ip, port)
+            # check if this peer already in self.peers
+            self.peers[p.id] = p
+
+    def _peers_dict_parse(self, peers: List[Dict]):
+        for peer in peers:
+            p = Peer(peer.get(b'ip'), peer.get(b'port'), peer.get(b'peer id'))
+            # check if this peer already in self.peers
+            self.peers[p.id] = p
