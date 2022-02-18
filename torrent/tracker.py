@@ -33,11 +33,17 @@ class Tracker:
         # self.ip =
         self.numwant = 30
 
-        # shuffle urls in levels for first read
-        # by BEP12: http://bittorrent.org/beps/bep_0012.html
+        self.announce_list = []
         if torrent.metadata.announce_list:
             for lvl in torrent.metadata.announce_list:
+                x = []
+                # shuffle urls in levels for first read
+                # by BEP12: http://bittorrent.org/beps/bep_0012.html
                 random.shuffle(lvl)
+                for announce in lvl:
+                    x.append(transport.tracker.TrackerTransport(announce))
+        else:
+            self.announce_list.append([transport.tracker.TrackerTransport(torrent.metadata.announce)])
 
     def get_peers(self):
         response = self._announce(_TrackerEvent.STARTED)
@@ -77,13 +83,15 @@ class Tracker:
             requests_keys = {
                 'info_hash': self.torrent.info_hash,
                 'peer_id': self.peer_id,
-                'port': self.port,
-                'uploaded': self.torrent.uploaded,
                 'downloaded': self.torrent.downloaded,
                 'left': self.torrent.left,
-                'compact': 1,
-                'numwant': self.numwant,
+                'uploaded': self.torrent.uploaded,
                 'event': event,
+                # 'ip': ,
+                # 'key': ,
+                'numwant': self.numwant,
+                'port': self.port,
+                'compact': 1,
             }
             return transport.tracker.http_request(u, requests_keys)
 
