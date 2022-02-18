@@ -8,7 +8,7 @@ from torrent import bencode
 
 class TorrentMetadata:
     def __init__(self, metadata: dict):
-        self.announce: str = metadata[b'announce']
+        self.announce: bytes = metadata[b'announce']
         self.announce_list: Optional[List[List[bytes]]] = metadata.get(b'announce-list')
         x = metadata.get(b'comment')
         if x is not None:

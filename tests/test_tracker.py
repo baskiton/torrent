@@ -50,10 +50,8 @@ class TestTracker(ut.TestCase):
     def test_get_peers(self):
         self.assertTrue(0)
 
-    def test_announce(self):
-        self.assertTrue(self._tracker._announce(torrent.tracker._TrackerEvent.STOPPED))
-
     def test_send_request(self):
         for url in self._urls:
             for evt in torrent.tracker._TrackerEvent:
-                self.assertTrue(self._tracker._send_request(evt._value_, url))
+                # self.assertTrue(self._tracker._send_request(evt._value_, url))
+                self.assertTrue(0)

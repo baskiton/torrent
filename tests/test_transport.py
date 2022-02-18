@@ -9,12 +9,12 @@ class TestTransportTracker(unittest.TestCase):
         u = urllib.parse.urlparse('http://aaa.b/announce')
         params = {}
 
-        self.assertTrue(transport.tracker.http_request(u, params))
+        self.assertTrue(0)
 
     def test_udp_request(self):
         u = urllib.parse.urlparse('udp://aaa.b/announce')
 
-        self.assertTrue(transport.tracker.udp_request(u))
+        self.assertTrue(0)
 
 
 class TestTransportPeer(unittest.TestCase):
