@@ -1,4 +1,7 @@
-__all__ = 'AnnounceEvent', 'AnnounceResponse', 'TrackerTransport'
+__all__ = (
+    'AnnounceResponse', 'ConnectResponse', 'ErrorResponse', 'ScrapeResponse',
+    'AnnounceEvent', 'TrackerTransport'
+)
 
 import enum
 import http.client
@@ -40,82 +43,256 @@ class _TPReqType(enum.IntEnum):
     ERROR = 3
 
 
-# Connect request
-# Offset  Size            Name            Value
-# 0       64-bit integer  protocol_id     0x41727101980 // magic constant
-# 8       32-bit integer  action          0 // connect
-# 12      32-bit integer  transaction_id
-# 16
-_CONNECTION_ID_TIMEOUT = 60
-_CONNECT_PROTOCOL_ID = 0x41727101980
-_CONNECT_REQ_FMT = '!QII'
-_CONNECT_REQ_NT = nt(
-    'connect_req',
-    'protocol_id action transaction_id',
-    defaults=[_CONNECT_PROTOCOL_ID, _TPReqType.CONNECT, None]
-)
+class _Request:
+    ACTION = _TPReqType.CONNECT
+    _COMMON_REQ_FMT = '!QII'
+    _REQ_FMT = ''
 
-# Connect response
-# Offset  Size            Name            Value
-# 0       32-bit integer  action          0 // connect
-# 4       32-bit integer  transaction_id
-# 8       64-bit integer  connection_id
-# 16
-_CONNECT_RESP_FMT = '!IIQ'
-_CONNECT_RESP_NT = nt('connect_req', 'action transaction_id connection_id')
-_CONNECT_RESP_LEN = struct.calcsize(_CONNECT_RESP_FMT)
+    def __init__(self,
+                 url: urllib.parse.ParseResultBytes,
+                 connection_id: int = None,
+                 dynamic_cid=True,
+                 **params):
+        self.url = url
+        self.connection_id = connection_id
+        self.dynamic_cid = dynamic_cid
+        self.transaction_id = None
+        self.params = params
 
-# Announce request
-# Offset  Size    Name    Value
-# 0       64-bit integer  connection_id
-# 8       32-bit integer  action          1 // announce
-# 12      32-bit integer  transaction_id
-# 16      20-byte string  info_hash
-# 36      20-byte string  peer_id
-# 56      64-bit integer  downloaded
-# 64      64-bit integer  left
-# 72      64-bit integer  uploaded
-# 80      32-bit integer  event           0 // 0: none; 1: completed; 2: started; 3: stopped
-# 84      32-bit integer  IP address      0 // default
-# 88      32-bit integer  key
-# 92      32-bit integer  num_want        -1 // default
-# 96      16-bit integer  port
-# 98
-_ANNOUNCE_REQ_FMT = '!QII20s20sQQQIIiiH'
-_ANNOUNCE_REQ_NT = nt(
-    'announce_req',
-    'connection_id action transaction_id info_hash peer_id '
-    'downloaded left uploaded event ip key numwant port',
-    defaults=[None, _TPReqType.ANNOUNCE, None, None, None,
-              None, None, None, AnnounceEvent.NONE, 0, None, -1, None]
-)
+    def http(self) -> urllib.request.Request:
+        """
+        using HTTP GET
+        BEP3: http://bittorrent.org/beps/bep_0003.html
+        """
 
-# Announce response
-# Offset      Size            Name            Value
-# 0           32-bit integer  action          1 // announce
-# 4           32-bit integer  transaction_id
-# 8           32-bit integer  interval
-# 12          32-bit integer  leechers
-# 16          32-bit integer  seeders
-# 20 + 6 * n  32-bit integer  IP address
-# 24 + 6 * n  16-bit integer  TCP port
-# 20 + 6 * N
-_ANNOUNCE_RESP_FMT = '!IIIII'
-_ANNOUNCE_RESP_LEN = struct.calcsize(_ANNOUNCE_RESP_FMT)
-_ANNOUNCE_RESP_NT = nt('announce_resp', 'action transaction_id interval leechers seeders')
-_ANNOUNCE_PEER_FMT = '!IH'
-_ANNOUNCE_PEER_NT = nt('peer', 'ip port')
+        req = urllib.request.Request(f'{self.url.geturl().decode("ascii")}'
+                                     f'{self.url.query and "&" or "?"}'
+                                     f'{urllib.parse.urlencode(self.params)}',
+                                     method='GET')
+        req.add_header('User-agent', f'pyTorrent/{__version__} by baskiton')
+        return req
+
+    def udp(self) -> bytes:
+        """
+        using UDP Tracker Protocol
+        BEP15: http://bittorrent.org/beps/bep_0015.html
+
+        Common / Connect request
+        Offset  Size            Name            Value
+        === common ==================
+        0       64-bit integer  connection_id
+        8       32-bit integer  action          ? // 0: connect; 1: announce; 2: scrape
+        12      32-bit integer  transaction_id
+        =============================
+        16
+        """
+
+        self.transaction_id = self._udp_get_transaction_id()
+
+        return struct.pack(self._COMMON_REQ_FMT + self._REQ_FMT,
+                           self.connection_id, self.ACTION, self.transaction_id,
+                           *self.params.values())
+
+    @staticmethod
+    def _udp_get_transaction_id() -> int:
+        return int.from_bytes(secrets.token_bytes(4), 'big', signed=False)
 
 
-class AnnounceResponse:
-    def __init__(self, interval: int, leechers: int, seeders: int, peers: List[torrent.Peer] = None, **kw):
+class ConnectRequest(_Request):
+    _CONNECT_PROTOCOL_ID = 0x41727101980
+
+    def __init__(self, url: urllib.parse.ParseResultBytes):
+        super(ConnectRequest, self).__init__(url, self._CONNECT_PROTOCOL_ID, False)
+
+
+class AnnounceRequest(_Request):
+    """
+    UDP Announce request
+    Offset  Size    Name    Value
+    === common ==================
+    0       64-bit integer  connection_id
+    8       32-bit integer  action          1 // announce
+    12      32-bit integer  transaction_id
+    =============================
+    16(0)   20-byte string  info_hash
+    36(20)  20-byte string  peer_id
+    56(40)  64-bit integer  downloaded
+    64(48)  64-bit integer  left
+    72(56)  64-bit integer  uploaded
+    80(64)  32-bit integer  event           0 // 0: none; 1: completed; 2: started; 3: stopped
+    84(68)  32-bit integer  IP address      0 // default
+    88(72)  32-bit integer  key
+    92(76)  32-bit integer  num_want        -1 // default
+    96(80)  16-bit integer  port
+    98(82)
+    """
+
+    ACTION = _TPReqType.ANNOUNCE
+    _REQ_FMT = '20s20sQQQIIiiH'
+
+    def __init__(self,
+                 url: urllib.parse.ParseResultBytes,
+                 info_hash: bytes,
+                 peer_id: bytes,
+                 downloaded: int,
+                 left: int,
+                 uploaded: int,
+                 event: AnnounceEvent = AnnounceEvent.NONE,
+                 key: int = -1,
+                 numwant: int = -1,
+                 ip=0,
+                 port: int = 6881):
+        super(AnnounceRequest, self).__init__(
+            url,
+            info_hash=info_hash,
+            peer_id=peer_id,
+            downloaded=downloaded,
+            left=left,
+            uploaded=uploaded,
+            event=event,
+            ip=ip,
+            key=key,
+            numwant=numwant,
+            port=port
+        )
+
+    def http(self) -> urllib.request.Request:
+        self.params.update(
+            compact=1,
+            event=_HTTP_ANNOUNCE_EVENT[self.params['event']]
+        )
+        # TODO: check ip, key
+        return super(AnnounceRequest, self).http()
+
+
+class ScrapeRequest(_Request):
+    # TODO
+    pass
+
+
+class _Response:
+    ACTION = None
+    RESP_LEN = 0
+
+    @classmethod
+    def from_bytes(cls, buf: bytes, start: int):
+        pass
+
+
+class ConnectResponse(_Response):
+    """
+    Connect response
+    Offset      Size            Name            Value
+    === common ======================================
+    0           32-bit integer  action          0 // connect
+    4           32-bit integer  transaction_id
+    =================================================
+    8(0)        64-bit integer  connection_id
+    16(8)
+    """
+
+    ACTION = _TPReqType.CONNECT
+    _RESP_FMT = '!Q'
+    RESP_LEN = struct.calcsize(_RESP_FMT)
+
+    def __init__(self, connection_id: int):
+        self.connection_id = connection_id
+
+    @classmethod
+    def from_bytes(cls, buf: bytes, start: int):
+        return cls(*struct.unpack_from(cls._RESP_FMT, buf, start))
+
+
+class AnnounceResponse(_Response):
+    """
+    Offset          Size            Name            Value
+    === common ==========================================
+    0               32-bit integer  action          1 // announce
+    4               32-bit integer  transaction_id
+    =====================================================
+    8(0)            32-bit integer  interval
+    12(4)           32-bit integer  leechers
+    16(8)           32-bit integer  seeders
+    20(12) + 6 * n  32-bit integer  IP address
+    24(16) + 6 * n  16-bit integer  TCP port
+    20(12) + 6 * N
+    """
+
+    ACTION = _TPReqType.ANNOUNCE
+    _RESP_FMT = '!III'
+    RESP_LEN = struct.calcsize(_RESP_FMT)
+    _PEER_FMT = '!IH'
+
+    def __init__(self, interval: int, leechers: int, seeders: int, peers: List[torrent.Peer] = None):
         self.interval = interval
         self.leechers = leechers
         self.seeders = seeders
         self.peers = peers or []
 
+    @classmethod
+    def from_bytes(cls, buf: bytes, start: int):
+        resp = cls(*struct.unpack_from(cls._RESP_FMT, buf, start))
+        for ip, port in struct.iter_unpack(cls._PEER_FMT, buf[cls.RESP_LEN + start:]):
+            resp.peers.append(torrent.Peer(ip, port))
+        return resp
+
+
+class ScrapeResponse(_Response):
+    """
+    Offset          Size            Name            Value
+    === common ==========================================
+    0               32-bit integer  action          2 // scrape
+    4               32-bit integer  transaction_id
+    =====================================================
+    8(0) + 12 * n   32-bit integer  seeders
+    12(4) + 12 * n  32-bit integer  completed
+    16(8) + 12 * n  32-bit integer  leechers
+    8(0) + 12 * N
+    """
+
+    MAX_TORRENTS = 74
+    ACTION = _TPReqType.SCRAPE
+    _RESP_FMT = '!III'
+    _TRUE_RESP_LEN = struct.calcsize(_RESP_FMT)
+    FILE_NT = nt('file', 'seeders completed leechers name', defaults=[b''])
+
+    def __init__(self, files: List[FILE_NT] = None):
+        self.files = files or []
+
+    @classmethod
+    def from_bytes(cls, buf: bytes, start: int):
+        return cls([cls.FILE_NT(*f)
+                    for f in struct.iter_unpack(cls._RESP_FMT, buf[start:])])
+
+
+class ErrorResponse(_Response, ConnectionError):
+    """
+    Offset      Size            Name            Value
+    === common ======================================
+    0           32-bit integer  action          3 // error
+    4           32-bit integer  transaction_id
+    =================================================
+    8(0)        string  message
+    """
+
+    ACTION = _TPReqType.ERROR
+
+    @classmethod
+    def from_bytes(cls, buf: bytes, start: int):
+        return cls(buf[start:].rstrip(b'\0').decode('ascii'))
+
 
 class TrackerTransport:
+    _CONNECTION_ID_TIMEOUT = 60
+    _COMMON_RESP_FMT = '!II'
+    _COMMON_RESP_LEN = struct.calcsize(_COMMON_RESP_FMT)
+    _RESP_ACTIONS_MATCH = {
+        _TPReqType.CONNECT: ConnectResponse,
+        _TPReqType.ANNOUNCE: AnnounceResponse,
+        _TPReqType.SCRAPE: ScrapeResponse,
+        _TPReqType.ERROR: ErrorResponse,
+    }
+
     def __init__(self, tracker_addr: bytes):
         self.tracker_addr = urllib.parse.urlparse(tracker_addr)
 
@@ -153,35 +330,27 @@ class TrackerTransport:
 
         raise ValueError(f'Unsupported url scheme: {self.tracker_addr.decode()}')
 
-    def _http_send_request(self, url: urllib.parse.ParseResultBytes, params: dict) -> Optional[Dict]:
+    def _http_send_request(self, req: _Request) -> Optional[Dict]:
         """
         using HTTP GET
         BEP3: http://bittorrent.org/beps/bep_0003.html
         """
 
-        req = urllib.request.Request(f'{url.geturl().decode("ascii")}'
-                                     f'{self.tracker_addr.query and "&" or "?"}'
-                                     f'{urllib.parse.urlencode(params)}',
-                                     method='GET')
-        req.add_header('User-agent', f'pyTorrent/{__version__} by baskiton')
-        with urllib.request.urlopen(req) as r:
+        with urllib.request.urlopen(req.http()) as r:
             r: http.client.HTTPResponse
             response = r.read()
         try:
             result = bencode.decode_from_buffer(response)
         except (ValueError, TypeError, EOFError) as e:
-            raise ValueError(f'{e}: {response}')
+            raise e(f'{e}: {response}')
+
         failure = result.get(b'failure reason')
         if failure:
-            raise ValueError(failure.decode())
+            raise ErrorResponse(failure.decode('ascii'))
         return result
 
     def _http_announce(self, params: dict) -> Optional[AnnounceResponse]:
-        params['compact'] = 1
-        params['event'] = _HTTP_ANNOUNCE_EVENT[params['event']]
-        # TODO: check ip, key
-
-        resp = self._http_send_request(self.tracker_addr, params)
+        resp = self._http_send_request(AnnounceRequest(self.tracker_addr, **params))
 
         intv = resp.get(b'min interval')
         if not intv:
@@ -200,63 +369,56 @@ class TrackerTransport:
 
         return result
 
-    def _udp_send_request(self, resp_fmt: str, resp_nt: Union[NamedTuple, nt], **params) -> Tuple[bytes, int]:
+    def _udp_send_request(self, req: _Request) -> Optional[_Response]:
         """
         using UDP Tracker Protocol
         BEP15: http://bittorrent.org/beps/bep_0015.html
         """
         # TODO: log it
 
-        transaction_id = 0
-        resp = b''
         t_ = 0
         with sk.socket(sk.AF_INET, sk.SOCK_DGRAM, sk.IPPROTO_UDP) as sock:
-            sock.connect((self.tracker_addr.hostname, self.tracker_addr.port))
-            print(f'send to {self.tracker_addr.geturl().decode("ascii")}')
+            sock.connect((req.url.hostname, req.url.port))
+            print(f'send {req.ACTION.name} '
+                  f'to {req.url.geturl().decode("ascii")}')
             for i in range(9):
-                if 'connection_id' in params:
-                    params['connection_id'] = self._udp_get_connection_id()
-                transaction_id = self._udp_get_transaction_id()
-                x = resp_nt(transaction_id=transaction_id, **params)
-                print(x)
-                req = struct.pack(resp_fmt, *x)
-
                 print(f'send t={t_}')
                 t = 15 * 2 ** i
                 t_ += t
                 sock.settimeout(t)
 
-                sock.send(req)
+                if req.dynamic_cid:
+                    req.connection_id = self._udp_get_connection_id()
+
+                sock.send(req.udp())
                 try:
-                    resp = sock.recv(8192)
-                    break
+                    resp = self._udp_build_response(sock.recv(8192), req.transaction_id)
+                    if isinstance(resp, ErrorResponse):
+                        raise resp
+                    if resp.ACTION == req.ACTION:
+                        return resp
                 except sk.timeout:
                     # TODO: log it?
                     pass
 
-        if len(resp) >= 8:
-            action, t_id = struct.unpack_from('!II', resp)
-            if action == _TPReqType.ERROR:
-                if t_id == transaction_id:
-                    raise ConnectionError(f'Tracker error: {resp[8:].decode()}')
-
-        return resp, transaction_id
-
-    @staticmethod
-    def _udp_get_transaction_id() -> int:
-        return int.from_bytes(secrets.token_bytes(4), 'big', signed=False)
+    @classmethod
+    def _udp_build_response(cls, buf: bytes, transaction_id: int):
+        if len(buf) >= cls._COMMON_RESP_LEN:
+            action, t_id = struct.unpack_from(cls._COMMON_RESP_FMT, buf)
+            if t_id == transaction_id:
+                resp_type = cls._RESP_ACTIONS_MATCH[_TPReqType(action)]
+                if len(buf) >= resp_type.RESP_LEN + cls._COMMON_RESP_LEN:
+                    return cls._RESP_ACTIONS_MATCH[_TPReqType(action)].from_bytes(buf, cls._COMMON_RESP_LEN)
 
     def _udp_connect(self) -> Optional[int]:
-        resp, transaction_id = self._udp_send_request(_CONNECT_REQ_FMT, _CONNECT_REQ_NT)
+        resp = self._udp_send_request(ConnectRequest(self.tracker_addr))
 
-        if len(resp) >= _CONNECT_RESP_LEN:
-            resp = _CONNECT_RESP_NT._make(struct.unpack_from(_CONNECT_RESP_FMT, resp))
-            if resp.transaction_id == transaction_id and resp.action == _TPReqType.CONNECT:
-                return resp.connection_id
+        if isinstance(resp, ConnectResponse):
+            return resp.connection_id
 
     def _udp_get_connection_id(self) -> int:
         now = time.time()
-        if (now - self.__connection_id_start > _CONNECTION_ID_TIMEOUT
+        if (now - self.__connection_id_start > self._CONNECTION_ID_TIMEOUT
                 or self.__connection_id is None):
             self.__connection_id = self._udp_connect()
             if self.__connection_id is not None:
@@ -264,14 +426,7 @@ class TrackerTransport:
         return self.__connection_id
 
     def _udp_announce(self, params: dict) -> Optional[AnnounceResponse]:
-        params.update(action=_TPReqType.ANNOUNCE, connection_id=0)
-        resp, transaction_id = self._udp_send_request(_ANNOUNCE_REQ_FMT, _ANNOUNCE_REQ_NT, **params)
+        resp = self._udp_send_request(AnnounceRequest(self.tracker_addr, **params))
 
-        if len(resp) >= _ANNOUNCE_RESP_LEN:
-            res = _ANNOUNCE_RESP_NT._make(struct.unpack_from(_ANNOUNCE_RESP_FMT, resp))
-            if (res.transaction_id == transaction_id
-                    and res.action == _TPReqType.ANNOUNCE):
-                result = AnnounceResponse(**res._asdict())
-                for peer in struct.iter_unpack(_ANNOUNCE_PEER_FMT, resp[_ANNOUNCE_RESP_LEN:]):
-                    result.peers.append(torrent.Peer(**_ANNOUNCE_PEER_NT._make(peer)._asdict()))
-                return result
+        if isinstance(resp, AnnounceResponse):
+            return resp

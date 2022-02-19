@@ -30,7 +30,7 @@ class Tracker:
         self.port = 6881    # 6881-6889
         self.udp_port = 8881    # 8881-8889
         # self.ip =
-        self.numwant = 30
+        self.numwant = 5
 
         self.announce_list = []
         if torrent.metadata.announce_list:
@@ -53,7 +53,7 @@ class Tracker:
             downloaded=self.torrent.downloaded,
             left=self.torrent.left,
             uploaded=self.torrent.uploaded,
-            event=transport.tracker.AnnounceEvent.STARTED,
+            # event=transport.tracker.AnnounceEvent.STARTED,
             # key=key,
             numwant=self.numwant,
             # ip=ip,
@@ -75,9 +75,10 @@ class Tracker:
                 params['port'] = self.udp_port if trt.tracker_addr.scheme == b'udp' else self.port
                 try:
                     result = trt_meth(trt, **params)
-                except BaseException as e:
+                except (ConnectionError, OSError) as e:
                     # TODO: log it
-                    print(f'<{trt.tracker_addr.geturl().decode("ascii")}>: {e}')
+                    print(f'{e.__class__.__name__}: {e} for '
+                          f'"{trt.tracker_addr.geturl().decode("ascii")}"')
                     continue
                 if result:
                     lvl.pop(idx)
