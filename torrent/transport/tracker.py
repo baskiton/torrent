@@ -27,14 +27,6 @@ class AnnounceEvent(enum.IntEnum):
     STOPPED = 3
 
 
-_HTTP_ANNOUNCE_EVENT = {
-    AnnounceEvent.NONE: '',
-    AnnounceEvent.COMPLETED: 'completed',
-    AnnounceEvent.STARTED: 'started',
-    AnnounceEvent.STOPPED: 'stopped',
-}
-
-
 @enum.unique
 class _TPReqType(enum.IntEnum):
     CONNECT = 0
@@ -129,6 +121,12 @@ class AnnounceRequest(_Request):
 
     ACTION = _TPReqType.ANNOUNCE
     _REQ_FMT = '20s20sQQQIIiiH'
+    _HTTP_ANNOUNCE_EVENT = {
+        AnnounceEvent.NONE: '',
+        AnnounceEvent.COMPLETED: 'completed',
+        AnnounceEvent.STARTED: 'started',
+        AnnounceEvent.STOPPED: 'stopped',
+    }
 
     def __init__(self,
                  url: urllib.parse.ParseResultBytes,
@@ -159,7 +157,7 @@ class AnnounceRequest(_Request):
     def http(self) -> urllib.request.Request:
         self.params.update(
             compact=1,
-            event=_HTTP_ANNOUNCE_EVENT[self.params['event']]
+            event=self._HTTP_ANNOUNCE_EVENT[self.params['event']]
         )
         # TODO: check ip, key
         return super(AnnounceRequest, self).http()
