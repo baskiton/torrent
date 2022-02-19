@@ -12,28 +12,28 @@ _SEP = b':'
 
 
 def _decode_int(stream: io.BytesIO) -> int:
-    i = b''
+    i = io.BytesIO()
     _ = stream.read(1)
     while _ != _END:
         if not _:
             raise EOFError()
-        i += _
+        i.write(_)
         _ = stream.read(1)
-    return int(i)
+    return int(i.getvalue())
 
 
 def _decode_buffer(stream: io.BytesIO) -> bytes:
     stream.seek(-1, io.SEEK_CUR)
-    sz = b''
+    sz = io.BytesIO()
     _ = stream.read(1)
     while _ != _SEP:
         if not len(_):
             raise EOFError()
         if not _.isdigit():
             raise ValueError(f'Expected digit, got `{_}` instead')
-        sz += _
+        sz.write(_)
         _ = stream.read(1)
-    return stream.read(int(sz))
+    return stream.read(int(sz.getvalue()))
 
 
 def _decode_list(stream: io.BytesIO) -> list:
