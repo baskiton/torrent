@@ -3,7 +3,7 @@ import random
 import secrets
 import time
 
-from typing import Any, Callable, Dict
+from typing import Any, AnyStr, Callable, Dict, Union
 
 from torrent import Peer, Torrent, transport
 
@@ -23,6 +23,7 @@ class Tracker:
         self.peers: Dict[int, Peer] = {}
         self.seeders = 0
         self.leechers = 0
+        self.proxies = {}
 
         # tracker requests keys
         # self.info_hash
@@ -40,10 +41,34 @@ class Tracker:
                 # by BEP12: http://bittorrent.org/beps/bep_0012.html
                 random.shuffle(lvl)
                 for announce in lvl:
-                    x.append(transport.tracker.TrackerTransport(announce))
+                    x.append(transport.tracker.TrackerTransport(announce, self.proxies))
                 self.announce_list.append(x)
         else:
-            self.announce_list.append([transport.tracker.TrackerTransport(torrent.metadata.announce)])
+            self.announce_list.append([transport.tracker.TrackerTransport(torrent.metadata.announce, self.proxies)])
+
+    def set_proxy(self, host: str, port: Union[int, AnyStr] = None):
+        """
+        >>> x = Tracker()
+        >>> x.set_proxy('abc.com', 123)
+        >>> x.set_proxy('abc.com', '123')
+        >>> x.set_proxy('abc.com:123')
+        >>> x.set_proxy('abc.com')
+        ValueError: Port not specified
+        """
+
+        if port is None:
+            if host.find(':') == -1:
+                raise ValueError('Port not specified')
+        else:
+            host = f'{host}:{port}'
+        self.proxies['http'] = host
+        for lvl in self.announce_list:
+            for t in lvl:
+                t.add_proxie({'http': host})
+
+    # def set_socks(self, host: str, port: Union[int, AnyStr] = None,
+    #               user: str = None, password: str = None,
+    #               version: Union[int, AnyStr] = 5):
 
     def get_peers(self):
         response: transport.tracker.AnnounceResponse = self._send_request(
@@ -77,7 +102,7 @@ class Tracker:
                     result = trt_meth(trt, **params)
                 except (ConnectionError, OSError) as e:
                     # TODO: log it
-                    print(f'{e.__class__.__name__}: {e} for '
+                    print(f'{e.__class__.__name__}: "{e}" for '
                           f'"{trt.tracker_addr.geturl().decode("ascii")}"')
                     continue
                 if result:

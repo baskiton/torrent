@@ -62,6 +62,7 @@ class _Request:
                                      f'{urllib.parse.urlencode(self.params)}',
                                      method='GET')
         req.add_header('User-agent', f'pyTorrent/{__version__} by baskiton')
+        req.add_header('Connection', 'close')
         return req
 
     def udp(self) -> bytes:
@@ -291,11 +292,19 @@ class TrackerTransport:
         _TPReqType.ERROR: ErrorResponse,
     }
 
-    def __init__(self, tracker_addr: bytes):
+    def __init__(self, tracker_addr: bytes, proxies: Dict[str, str] = None):
         self.tracker_addr = urllib.parse.urlparse(tracker_addr)
+        self.proxies = proxies
+        self._proxy_handler = urllib.request.ProxyHandler(proxies)
 
         self.__connection_id = None
         self.__connection_id_start = 0
+        self.__udp_ip = ''
+        self.__udp_port = self.tracker_addr.port
+
+    def add_proxie(self, proxies: Dict[str, str]):
+        self.proxies.update(proxies)
+        self._proxy_handler.__init__(self.proxies)
 
     def announce(self,
                  info_hash: bytes,
@@ -334,7 +343,9 @@ class TrackerTransport:
         BEP3: http://bittorrent.org/beps/bep_0003.html
         """
 
-        with urllib.request.urlopen(req.http()) as r:
+        hdlr = urllib.request.ProxyHandler(self.proxies)
+        opener = urllib.request.build_opener(self._proxy_handler)
+        with opener.open(req.http()) as r:
             r: http.client.HTTPResponse
             response = r.read()
         try:
@@ -376,19 +387,17 @@ class TrackerTransport:
 
         t_ = 0
         with sk.socket(sk.AF_INET, sk.SOCK_DGRAM, sk.IPPROTO_UDP) as sock:
-            sock.connect((req.url.hostname, req.url.port))
-            print(f'send {req.ACTION.name} '
-                  f'to {req.url.geturl().decode("ascii")}')
             for i in range(9):
-                print(f'send t={t_}')
                 t = 15 * 2 ** i
-                t_ += t
                 sock.settimeout(t)
 
                 if req.dynamic_cid:
                     req.connection_id = self._udp_get_connection_id()
 
-                sock.send(req.udp())
+                print(f'send {req.ACTION.name} t={t_}')
+                t_ += t
+
+                sock.sendto(req.udp(), (self.__udp_ip, self.__udp_port))
                 try:
                     resp = self._udp_build_response(sock.recv(8192), req.transaction_id)
                     if isinstance(resp, ErrorResponse):
@@ -409,6 +418,8 @@ class TrackerTransport:
                     return cls._RESP_ACTIONS_MATCH[_TPReqType(action)].from_bytes(buf, cls._COMMON_RESP_LEN)
 
     def _udp_connect(self) -> Optional[int]:
+        self.__udp_ip = sk.gethostbyname(self.tracker_addr.hostname)
+        print(f'connecting with {self.__udp_ip}')
         resp = self._udp_send_request(ConnectRequest(self.tracker_addr))
 
         if isinstance(resp, ConnectResponse):
