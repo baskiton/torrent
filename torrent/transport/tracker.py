@@ -343,7 +343,6 @@ class TrackerTransport:
         BEP3: http://bittorrent.org/beps/bep_0003.html
         """
 
-        hdlr = urllib.request.ProxyHandler(self.proxies)
         opener = urllib.request.build_opener(self._proxy_handler)
         with opener.open(req.http()) as r:
             r: http.client.HTTPResponse
