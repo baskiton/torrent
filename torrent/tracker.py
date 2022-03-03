@@ -64,7 +64,7 @@ class Tracker:
         self.proxies['http'] = host
         for lvl in self.announce_list:
             for t in lvl:
-                t.add_proxie({'http': host})
+                t.add_proxy({'http': host})
 
     # def set_socks(self, host: str, port: Union[int, AnyStr] = None,
     #               user: str = None, password: str = None,

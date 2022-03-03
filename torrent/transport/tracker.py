@@ -5,17 +5,23 @@ __all__ = (
 
 import enum
 import http.client
+import io
+import multiprocessing as mp
+import multiprocessing.connection as mpcon
 import secrets
+import select
 import socket as sk
 import struct
-import time
+import threading
 import urllib.parse
 import urllib.request
+import urllib.response
 
 from collections import namedtuple as nt
-from typing import Dict, List, NamedTuple, Optional, Tuple, Union
+from typing import AnyStr, Dict, List, Optional, Tuple
 
 import torrent
+
 from torrent import __version__, bencode
 
 
@@ -51,13 +57,19 @@ class _Request:
         self.transaction_id = None
         self.params = params
 
+    def get_req(self) -> urllib.request.Request:
+        if self.url.scheme == b'udp':
+            return urllib.request.Request(self.url.geturl().decode('idna'), self)
+        if self.url.scheme.startswith(b'http'):
+            return self.http()
+
     def http(self) -> urllib.request.Request:
         """
         using HTTP GET
         BEP3: http://bittorrent.org/beps/bep_0003.html
         """
 
-        req = urllib.request.Request(f'{self.url.geturl().decode("ascii")}'
+        req = urllib.request.Request(f'{self.url.geturl().decode("idna")}'
                                      f'{self.url.query and "&" or "?"}'
                                      f'{urllib.parse.urlencode(self.params)}',
                                      method='GET')
@@ -81,7 +93,6 @@ class _Request:
         """
 
         self.transaction_id = self._udp_get_transaction_id()
-
         return struct.pack(self._COMMON_REQ_FMT + self._REQ_FMT,
                            self.connection_id, self.ACTION, self.transaction_id,
                            *self.params.values())
@@ -171,11 +182,43 @@ class ScrapeRequest(_Request):
 
 class _Response:
     ACTION = None
-    RESP_LEN = 0
+    _RESP_LEN = 0
+    _COMMON_RESP_FMT = '!II'
+    _COMMON_RESP_LEN = struct.calcsize(_COMMON_RESP_FMT)
 
     @classmethod
-    def from_bytes(cls, buf: bytes, start: int):
+    def from_buf(cls, buf: io.BytesIO) -> Optional['_Response']:
         pass
+
+    @classmethod
+    def from_bencode(cls, buf: bytes) -> Optional['_Response']:
+        pass
+
+    @classmethod
+    def build(cls, resp: bytes, transaction_id=0) -> Optional['_Response']:
+        """
+        Connect response
+        Offset      Size            Name            Value
+        === common ======================================
+        0           32-bit integer  action          0 // connect
+        4           32-bit integer  transaction_id
+        =================================================
+        8(0)
+        """
+        try:
+            resp = bencode.decode_from_buffer(resp)
+        except (ValueError, TypeError, EOFError):
+            if len(resp) >= cls._COMMON_RESP_LEN:
+                buf = io.BytesIO(resp)
+                action, t_id = struct.unpack(cls._COMMON_RESP_FMT, buf.read(cls._COMMON_RESP_LEN))
+                if t_id == transaction_id:
+                    return _RESP_ACTIONS_MATCH[_TPReqType(action)].from_buf(buf)
+        else:
+            failure = resp.get(b'failure reason')
+            if failure:
+                return ErrorResponse(failure.decode('ascii'))
+
+            return (ScrapeResponse if b'files' in resp else AnnounceResponse).from_bencode(resp)
 
 
 class ConnectResponse(_Response):
@@ -192,14 +235,16 @@ class ConnectResponse(_Response):
 
     ACTION = _TPReqType.CONNECT
     _RESP_FMT = '!Q'
-    RESP_LEN = struct.calcsize(_RESP_FMT)
+    _RESP_LEN = struct.calcsize(_RESP_FMT)
 
     def __init__(self, connection_id: int):
         self.connection_id = connection_id
 
     @classmethod
-    def from_bytes(cls, buf: bytes, start: int):
-        return cls(*struct.unpack_from(cls._RESP_FMT, buf, start))
+    def from_buf(cls, buf: io.BytesIO) -> Optional['ConnectResponse']:
+        x = buf.read(cls._RESP_LEN)
+        if len(x) == cls._RESP_LEN:
+            return cls(*struct.unpack(cls._RESP_FMT, x))
 
 
 class AnnounceResponse(_Response):
@@ -219,7 +264,7 @@ class AnnounceResponse(_Response):
 
     ACTION = _TPReqType.ANNOUNCE
     _RESP_FMT = '!III'
-    RESP_LEN = struct.calcsize(_RESP_FMT)
+    _RESP_LEN = struct.calcsize(_RESP_FMT)
     _PEER_FMT = '!IH'
 
     def __init__(self, interval: int, leechers: int, seeders: int, peers: List[torrent.Peer] = None):
@@ -227,14 +272,36 @@ class AnnounceResponse(_Response):
         self.leechers = leechers
         self.seeders = seeders
         self.peers = peers or []
+        self.tracker_id = b''
 
     @classmethod
-    def from_bytes(cls, buf: bytes, start: int):
-        resp = cls(*struct.unpack_from(cls._RESP_FMT, buf, start))
-        for ip, port in struct.iter_unpack(cls._PEER_FMT, buf[cls.RESP_LEN + start:]):
-            resp.peers.append(torrent.Peer(ip, port))
-        return resp
+    def from_buf(cls, buf: io.BytesIO) -> Optional['AnnounceResponse']:
+        x = buf.read(cls._RESP_LEN)
+        if len(x) >= cls._RESP_LEN:
+            resp = cls(*struct.unpack(cls._RESP_FMT, x))
+            for ip, port in struct.iter_unpack(cls._PEER_FMT, buf.read()):
+                resp.peers.append(torrent.Peer(ip, port))
+            return resp
 
+    @classmethod
+    def from_bencode(cls, data: dict) -> Optional['AnnounceResponse']:
+        resp = cls(0, 0, 0)
+        resp.interval = data.get(b'min interval') or data[b'interval']
+        resp.leechers = data.get(b'incomplete', 0)
+        resp.seeders = data.get(b'complete', 0)
+        resp.tracker_id = data.get(b'tracker id', b'')
+
+        peers = data.get(b'peers')
+        if isinstance(peers, bytes):
+            # compact model
+            resp.peers = list(torrent.Peer(ip, port)
+                              for ip, port in struct.iter_unpack('!IH', peers))
+        elif isinstance(peers, list):
+            # dictionary model
+            resp.peers = list(torrent.Peer(peer[b'ip'], peer[b'port'], peer.get(b'peer id'))
+                              for peer in peers)
+
+        return resp
 
 class ScrapeResponse(_Response):
     """
@@ -251,17 +318,24 @@ class ScrapeResponse(_Response):
 
     MAX_TORRENTS = 74
     ACTION = _TPReqType.SCRAPE
-    _RESP_FMT = '!III'
-    _TRUE_RESP_LEN = struct.calcsize(_RESP_FMT)
-    FILE_NT = nt('file', 'seeders completed leechers name', defaults=[b''])
+    _RESP_FMT = ''
+    _FILE_FMT = '!III'
+    FILE_NT = nt('file', 'seeders completed leechers name info_hash', defaults=[b'', b''])
 
     def __init__(self, files: List[FILE_NT] = None):
         self.files = files or []
 
     @classmethod
-    def from_bytes(cls, buf: bytes, start: int):
+    def from_buf(cls, buf: io.BytesIO) -> Optional['ScrapeResponse']:
         return cls([cls.FILE_NT(*f)
-                    for f in struct.iter_unpack(cls._RESP_FMT, buf[start:])])
+                    for f in struct.iter_unpack(cls._FILE_FMT, buf.read())])
+
+    @classmethod
+    def from_bencode(cls, data: dict) -> Optional['ScrapeResponse']:
+        return cls(
+            [cls.FILE_NT(file[b'complete'], file[b'downloaded'], file[b'incomplete'], file.get(b'name', b''), info_hash)
+             for info_hash, file in data[b'files'].items()]
+        )
 
 
 class ErrorResponse(_Response, ConnectionError):
@@ -277,21 +351,198 @@ class ErrorResponse(_Response, ConnectionError):
     ACTION = _TPReqType.ERROR
 
     @classmethod
-    def from_bytes(cls, buf: bytes, start: int):
-        return cls(buf[start:].rstrip(b'\0').decode('ascii'))
+    def from_buf(cls, buf: io.BytesIO) -> Optional['ErrorResponse']:
+        x = buf.read()
+        if x:
+            return cls(x.rstrip(b'\0').decode('ascii'))
+
+
+_RESP_ACTIONS_MATCH = {
+    _TPReqType.CONNECT: ConnectResponse,
+    _TPReqType.ANNOUNCE: AnnounceResponse,
+    _TPReqType.SCRAPE: ScrapeResponse,
+    _TPReqType.ERROR: ErrorResponse,
+}
+
+
+class UDPConnection:
+    def __init__(self, req: urllib.request.Request):
+        u = urllib.parse.urlsplit(req.full_url)
+        if req.has_proxy():
+            self.peer_addr = urllib.parse._splitnport(req.host, 80)
+        else:
+            self.peer_addr: Optional[Tuple[AnyStr, int]] = u.hostname, u.port
+
+        self.sock: Optional[sk.socket] = None
+        self.connection_id: Optional[int] = None
+
+        self.__header = b''
+        self.__response: Optional[_Response] = None
+
+    def connect(self) -> None:
+        print(f'try connecting with {self.peer_addr}')
+
+        main_con, child_con = mp.Pipe(True)
+
+        ths = {}
+        for addr_info in sk.getaddrinfo(*self.peer_addr, 0, sk.SOCK_DGRAM, sk.IPPROTO_UDP):
+            t = threading.Thread(target=self._connect, args=(child_con, addr_info), daemon=True)
+            t.start()
+            ths[t.ident] = t
+
+        while ths:
+            x = main_con.recv()
+            if isinstance(x, int):
+                ths.pop(x, None)
+                continue
+            thr_id, sock, resp = x
+            sock: sk.socket
+            resp: _Response
+
+            if not resp:
+                sock.close()
+                ths.pop(thr_id, None)
+                continue
+
+            self.sock = sock
+            self.peer_addr = sock.getpeername()
+            self.connection_id = resp.connection_id
+            break
+
+        main_con.send('.')
+        for t in ths.values():
+            t.join()
+
+
+    def _connect(self, con: mpcon.Connection, addr_info: Tuple):
+        af, socktype, proto, canonname, sa = addr_info
+        con_req = ConnectRequest(urllib.parse.urlparse(
+            f'udp://{self.peer_addr[0]}:{self.peer_addr[1]}'.encode('idna')))
+        poller = select.poll()
+        sock = sk.socket(af, socktype, proto)
+
+        poller.register(sock.fileno(), select.POLLIN)
+        poller.register(con.fileno(), select.POLLIN)
+
+        sock.connect(sa)
+        for i in range(9):
+            t = 15000 * 2 ** i  # ms
+            sock.sendall(self.__header + con_req.udp())
+
+            for fd, evt in poller.poll(t):
+                if fd == sock.fileno():
+                    x = sock.recv(65535)
+                    resp = _Response.build(x, con_req.transaction_id)
+                    if (not resp
+                            or (resp.ACTION != con_req.ACTION
+                                and not isinstance(resp, ErrorResponse))):
+                        break
+                    if isinstance(resp, ErrorResponse):
+                        raise resp
+                    con.send((threading.get_ident(), sock, resp))
+                else:
+                    sock.close()
+                return
+
+    def close(self) -> None:
+        try:
+            s = self.sock
+            if s:
+                self.sock = None
+                s.close()
+        finally:
+            self.__response = None
+
+    def send_request(self, req: _Request) -> Optional[_Response]:
+        if self.sock is None:
+            self.connect()
+
+        if self.connection_id is not None:
+            req.connection_id = self.connection_id
+
+        self.__response = self._send_request(self.sock, req)
+        return self.__response
+
+    def _send_request(self, con: sk.socket, req: _Request) -> Optional[_Response]:
+        print(f'send {req.ACTION.name} t=0')
+        for i in range(9):
+            t = 15 * 2 ** i
+            con.settimeout(t)
+
+            con.sendall(self.__header + req.udp())
+            try:
+                resp = con.recv(65535)
+            except sk.timeout:
+                print(f'send {req.ACTION.name} {t=}')
+                # TODO: log it?
+                continue
+
+            resp = _Response.build(resp, req.transaction_id)
+            if (not resp
+                    or (resp.ACTION != req.ACTION
+                        and not isinstance(resp, ErrorResponse))):
+                continue
+
+            return resp
+
+    def get_response(self) -> _Response:
+        return self.__response
+
+    def read(self) -> _Response:
+        return self.__response
+
+    def set_socks5_header(self, header: bytes):
+        self.__header = header
+
+
+class UDPHandler(urllib.request.BaseHandler):
+
+    def udp_open(self, req: urllib.request.Request) -> UDPConnection:
+        print('udp_open', req.full_url)
+        con = UDPConnection(req)
+        con.connect()
+        con.send_request(req.data)
+        return con
+
+
+class TrackerOpener(urllib.request.OpenerDirector):
+    def open(self, fullurl, data=None, timeout=sk._GLOBAL_DEFAULT_TIMEOUT) -> _Response:
+        x = super(TrackerOpener, self).open(fullurl, data, timeout).read()
+        if isinstance(x, bytes):
+            return _Response.build(x)
+        return x
+
+
+def build_opener(*handlers):
+    opener = TrackerOpener()
+    default_classes = [urllib.request.ProxyHandler, urllib.request.UnknownHandler, urllib.request.HTTPHandler,
+                       urllib.request.HTTPDefaultErrorHandler, urllib.request.HTTPRedirectHandler,
+                       urllib.request.FTPHandler, urllib.request.FileHandler, urllib.request.HTTPErrorProcessor,
+                       urllib.request.DataHandler, UDPHandler]
+    if hasattr(http.client, "HTTPSConnection"):
+        default_classes.append(urllib.request.HTTPSHandler)
+    skip = set()
+    for klass in default_classes:
+        for check in handlers:
+            if isinstance(check, type):
+                if issubclass(check, klass):
+                    skip.add(klass)
+            elif isinstance(check, klass):
+                skip.add(klass)
+    for klass in skip:
+        default_classes.remove(klass)
+
+    for klass in default_classes:
+        opener.add_handler(klass())
+
+    for h in handlers:
+        if isinstance(h, type):
+            h = h()
+        opener.add_handler(h)
+    return opener
 
 
 class TrackerTransport:
-    _CONNECTION_ID_TIMEOUT = 60
-    _COMMON_RESP_FMT = '!II'
-    _COMMON_RESP_LEN = struct.calcsize(_COMMON_RESP_FMT)
-    _RESP_ACTIONS_MATCH = {
-        _TPReqType.CONNECT: ConnectResponse,
-        _TPReqType.ANNOUNCE: AnnounceResponse,
-        _TPReqType.SCRAPE: ScrapeResponse,
-        _TPReqType.ERROR: ErrorResponse,
-    }
-
     def __init__(self, tracker_addr: bytes, proxies: Dict[str, str] = None):
         self.tracker_addr = urllib.parse.urlparse(tracker_addr)
         self.proxies = proxies
@@ -302,8 +553,12 @@ class TrackerTransport:
         self.__udp_ip = ''
         self.__udp_port = self.tracker_addr.port
 
-    def add_proxie(self, proxies: Dict[str, str]):
+    def add_proxy(self, proxies: Dict[str, str]):
         self.proxies.update(proxies)
+        self._proxy_handler.__init__(self.proxies)
+
+    def clear_proxy(self, type: str):
+        self.proxies.pop(type)
         self._proxy_handler.__init__(self.proxies)
 
     def announce(self,
@@ -317,124 +572,13 @@ class TrackerTransport:
                  numwant: int = -1,
                  ip=0,
                  port: int = 6881):
-        params = {
-            'info_hash': info_hash,
-            'peer_id': peer_id,
-            'downloaded': downloaded,
-            'left': left,
-            'uploaded': uploaded,
-            'event': event,
-            'ip': ip,
-            'key': key,
-            'numwant': numwant,
-            'port': port,
-        }
-        if self.tracker_addr.scheme in (b'http', b'https'):
-            return self._http_announce(params)
+        return self._send_request(AnnounceRequest(self.tracker_addr, info_hash, peer_id,
+                                                  downloaded, left, uploaded, event,
+                                                  key, numwant, ip, port))
 
-        elif self.tracker_addr.scheme == b'udp':
-            return self._udp_announce(params)
-
-        raise ValueError(f'Unsupported url scheme: {self.tracker_addr.decode()}')
-
-    def _http_send_request(self, req: _Request) -> Optional[Dict]:
-        """
-        using HTTP GET
-        BEP3: http://bittorrent.org/beps/bep_0003.html
-        """
-
-        opener = urllib.request.build_opener(self._proxy_handler)
-        with opener.open(req.http()) as r:
-            r: http.client.HTTPResponse
-            response = r.read()
-        try:
-            result = bencode.decode_from_buffer(response)
-        except (ValueError, TypeError, EOFError) as e:
-            raise e(f'{e}: {response}')
-
-        failure = result.get(b'failure reason')
-        if failure:
-            raise ErrorResponse(failure.decode('ascii'))
-        return result
-
-    def _http_announce(self, params: dict) -> Optional[AnnounceResponse]:
-        resp = self._http_send_request(AnnounceRequest(self.tracker_addr, **params))
-
-        intv = resp.get(b'min interval')
-        if not intv:
-            intv = resp[b'interval']
-        result = AnnounceResponse(intv, resp.get(b'incomplete'), resp.get(b'complete'))
-
-        peers = resp.get(b'peers')
-        if isinstance(peers, bytes):
-            # compact model
-            result.peers = list(torrent.Peer(ip, port)
-                                for ip, port in struct.iter_unpack('!IH', peers))
-        elif isinstance(peers, list):
-            # dictionary model
-            result.peers = list(torrent.Peer(peer[b'ip'], peer[b'port'], peer.get(b'peer id'))
-                                for peer in peers)
-
-        return result
-
-    def _udp_send_request(self, req: _Request) -> Optional[_Response]:
-        """
-        using UDP Tracker Protocol
-        BEP15: http://bittorrent.org/beps/bep_0015.html
-        """
-        # TODO: log it
-
-        t_ = 0
-        with sk.socket(sk.AF_INET, sk.SOCK_DGRAM, sk.IPPROTO_UDP) as sock:
-            for i in range(9):
-                t = 15 * 2 ** i
-                sock.settimeout(t)
-
-                if req.dynamic_cid:
-                    req.connection_id = self._udp_get_connection_id()
-
-                print(f'send {req.ACTION.name} t={t_}')
-                t_ += t
-
-                sock.sendto(req.udp(), (self.__udp_ip, self.__udp_port))
-                try:
-                    resp = self._udp_build_response(sock.recv(8192), req.transaction_id)
-                    if isinstance(resp, ErrorResponse):
-                        raise resp
-                    if resp.ACTION == req.ACTION:
-                        return resp
-                except sk.timeout:
-                    # TODO: log it?
-                    pass
-
-    @classmethod
-    def _udp_build_response(cls, buf: bytes, transaction_id: int):
-        if len(buf) >= cls._COMMON_RESP_LEN:
-            action, t_id = struct.unpack_from(cls._COMMON_RESP_FMT, buf)
-            if t_id == transaction_id:
-                resp_type = cls._RESP_ACTIONS_MATCH[_TPReqType(action)]
-                if len(buf) >= resp_type.RESP_LEN + cls._COMMON_RESP_LEN:
-                    return cls._RESP_ACTIONS_MATCH[_TPReqType(action)].from_bytes(buf, cls._COMMON_RESP_LEN)
-
-    def _udp_connect(self) -> Optional[int]:
-        self.__udp_ip = sk.gethostbyname(self.tracker_addr.hostname)
-        print(f'connecting with {self.__udp_ip}')
-        resp = self._udp_send_request(ConnectRequest(self.tracker_addr))
-
-        if isinstance(resp, ConnectResponse):
-            return resp.connection_id
-
-    def _udp_get_connection_id(self) -> int:
-        now = time.time()
-        if (now - self.__connection_id_start > self._CONNECTION_ID_TIMEOUT
-                or self.__connection_id is None):
-            self.__connection_id = self._udp_connect()
-            if self.__connection_id is not None:
-                self.__connection_id_start = now
-        return self.__connection_id
-
-    def _udp_announce(self, params: dict) -> Optional[AnnounceResponse]:
-        resp = self._udp_send_request(AnnounceRequest(self.tracker_addr, **params))
-
-        if isinstance(resp, AnnounceResponse):
-            return resp
+    def _send_request(self, req: _Request) -> _Response:
+        opener = build_opener(self._proxy_handler)
+        r = opener.open(req.get_req())
+        if isinstance(r, ErrorResponse):
+            raise r
+        return r
