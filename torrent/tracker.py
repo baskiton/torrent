@@ -70,6 +70,23 @@ class Tracker:
     #               user: str = None, password: str = None,
     #               version: Union[int, AnyStr] = 5):
 
+    def _send_request(self, trt_meth: Callable, **params) -> Any:
+        for lvl in self.announce_list:
+            for idx, trt in enumerate(lvl):
+                params['port'] = self.udp_port if trt.tracker_addr.scheme == b'udp' else self.port
+                try:
+                    result = trt_meth(trt, **params)
+                except (ConnectionError, OSError) as e:
+                    # TODO: log it
+                    print(f'{e.__class__.__name__}: "{e}" for '
+                          f'"{trt.tracker_addr.geturl().decode("ascii")}"')
+                    continue
+                if result:
+                    lvl.pop(idx)
+                    lvl.insert(0, trt)
+                    self.last_connecting_time = time.time()
+                    return result
+
     def get_peers(self):
         response: transport.tracker.AnnounceResponse = self._send_request(
             transport.tracker.TrackerTransport.announce,
@@ -93,20 +110,3 @@ class Tracker:
                 # check if this peer already in self.peers
                 self.peers[peer.id] = peer
             return response.peers
-
-    def _send_request(self, trt_meth: Callable, **params) -> Any:
-        for lvl in self.announce_list:
-            for idx, trt in enumerate(lvl):
-                params['port'] = self.udp_port if trt.tracker_addr.scheme == b'udp' else self.port
-                try:
-                    result = trt_meth(trt, **params)
-                except (ConnectionError, OSError) as e:
-                    # TODO: log it
-                    print(f'{e.__class__.__name__}: "{e}" for '
-                          f'"{trt.tracker_addr.geturl().decode("ascii")}"')
-                    continue
-                if result:
-                    lvl.pop(idx)
-                    lvl.insert(0, trt)
-                    self.last_connecting_time = time.time()
-                    return result

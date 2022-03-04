@@ -18,7 +18,7 @@ import urllib.request
 import urllib.response
 
 from collections import namedtuple as nt
-from typing import AnyStr, Dict, List, Optional, Tuple
+from typing import AnyStr, Dict, List, Optional, Sequence, Tuple, Union
 
 import torrent
 
@@ -49,11 +49,9 @@ class _Request:
     def __init__(self,
                  url: urllib.parse.ParseResultBytes,
                  connection_id: int = None,
-                 dynamic_cid=True,
                  **params):
         self.url = url
         self.connection_id = connection_id
-        self.dynamic_cid = dynamic_cid
         self.transaction_id = None
         self.params = params
 
@@ -71,7 +69,7 @@ class _Request:
 
         req = urllib.request.Request(f'{self.url.geturl().decode("idna")}'
                                      f'{self.url.query and "&" or "?"}'
-                                     f'{urllib.parse.urlencode(self.params)}',
+                                     f'{urllib.parse.urlencode(self.params, True)}',
                                      method='GET')
         req.add_header('User-agent', f'pyTorrent/{__version__} by baskiton')
         req.add_header('Connection', 'close')
@@ -93,9 +91,17 @@ class _Request:
         """
 
         self.transaction_id = self._udp_get_transaction_id()
-        return struct.pack(self._COMMON_REQ_FMT + self._REQ_FMT,
+
+        params = self.params.values()
+        if len(params) == 1:
+            params, = params
+            req_cnt = len(params)
+        else:
+            req_cnt = 1
+
+        return struct.pack(self._COMMON_REQ_FMT + self._REQ_FMT * req_cnt,
                            self.connection_id, self.ACTION, self.transaction_id,
-                           *self.params.values())
+                           *params)
 
     @staticmethod
     def _udp_get_transaction_id() -> int:
@@ -106,7 +112,7 @@ class ConnectRequest(_Request):
     _CONNECT_PROTOCOL_ID = 0x41727101980
 
     def __init__(self, url: urllib.parse.ParseResultBytes):
-        super(ConnectRequest, self).__init__(url, self._CONNECT_PROTOCOL_ID, False)
+        super(ConnectRequest, self).__init__(url, self._CONNECT_PROTOCOL_ID)
 
 
 class AnnounceRequest(_Request):
@@ -176,8 +182,29 @@ class AnnounceRequest(_Request):
 
 
 class ScrapeRequest(_Request):
-    # TODO
-    pass
+    """
+    UDP Scrape request
+    Offset          Size            Name            Value
+    === common ==================
+    0               64-bit integer  connection_id
+    8               32-bit integer  action          2 // scrape
+    12              32-bit integer  transaction_id
+    === common ==================
+    16 + 20 * n     20-byte string  info_hash
+    16 + 20 * N
+    """
+    ACTION = _TPReqType.SCRAPE
+    _REQ_FMT = '20s'
+
+    def __init__(self, url: urllib.parse.ParseResultBytes, info_hash: Sequence[bytes] = ()):
+        u = list(url)
+        if u[2].endswith(b'/announce'):
+            u[2] = u[2][:-9] + b'/scrape'
+        else:
+            raise ValueError(f'Scrape not support on tracker {url.hostname.decode()}')
+        url = urllib.parse.ParseResultBytes(*u)
+
+        super(ScrapeRequest, self).__init__(url, info_hash=info_hash)
 
 
 class _Response:
@@ -412,6 +439,7 @@ class UDPConnection:
         main_con.send('.')
         for t in ths.values():
             t.join()
+        print('OK')
 
 
     def _connect(self, con: mpcon.Connection, addr_info: Tuple):
@@ -561,6 +589,13 @@ class TrackerTransport:
         self.proxies.pop(type)
         self._proxy_handler.__init__(self.proxies)
 
+    def _send_request(self, req: _Request) -> _Response:
+        opener = build_opener(self._proxy_handler)
+        r = opener.open(req.get_req())
+        if isinstance(r, ErrorResponse):
+            raise r
+        return r
+
     def announce(self,
                  info_hash: bytes,
                  peer_id: bytes,
@@ -571,14 +606,19 @@ class TrackerTransport:
                  key: int = -1,
                  numwant: int = -1,
                  ip=0,
-                 port: int = 6881):
+                 port: int = 6881) -> Union[_Response, AnnounceResponse]:
         return self._send_request(AnnounceRequest(self.tracker_addr, info_hash, peer_id,
                                                   downloaded, left, uploaded, event,
                                                   key, numwant, ip, port))
 
-    def _send_request(self, req: _Request) -> _Response:
-        opener = build_opener(self._proxy_handler)
-        r = opener.open(req.get_req())
-        if isinstance(r, ErrorResponse):
-            raise r
-        return r
+    def scrape(self, info_hashes: Sequence[bytes] = ()) -> Union[_Response, ScrapeResponse]:
+        return self._send_request(ScrapeRequest(self.tracker_addr, info_hashes))
+
+
+if __name__ == '__main__':
+    import pathlib
+    t = torrent.Torrent.from_file(pathlib.Path('/home/baskiton/source/torrent/tests/files/test_1.torrent'))
+    tracker = TrackerTransport(t.metadata.announce)
+    x = tracker.scrape((t.info_hash,))
+    for f in x.files:
+        print(f)
