@@ -201,7 +201,7 @@ class ScrapeRequest(_Request):
         if u[2].endswith(b'/announce'):
             u[2] = u[2][:-9] + b'/scrape'
         else:
-            raise ValueError(f'Scrape not support on tracker {url.hostname.decode()}')
+            raise ValueError(f'Scrape not supported by tracker {url.hostname.decode()}')
         url = urllib.parse.ParseResultBytes(*u)
 
         super(ScrapeRequest, self).__init__(url, info_hash=info_hash)
@@ -613,12 +613,3 @@ class TrackerTransport:
 
     def scrape(self, info_hashes: Sequence[bytes] = ()) -> Union[_Response, ScrapeResponse]:
         return self._send_request(ScrapeRequest(self.tracker_addr, info_hashes))
-
-
-if __name__ == '__main__':
-    import pathlib
-    t = torrent.Torrent.from_file(pathlib.Path('/home/baskiton/source/torrent/tests/files/test_1.torrent'))
-    tracker = TrackerTransport(t.metadata.announce)
-    x = tracker.scrape((t.info_hash,))
-    for f in x.files:
-        print(f)
