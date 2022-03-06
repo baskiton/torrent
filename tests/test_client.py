@@ -3,12 +3,45 @@ import unittest as ut
 
 import btorrent
 
+CFG_DIR = pathlib.Path('tests/tmp')
+CFG_FILE = pathlib.Path(CFG_DIR / 'test_cfg.ini')
+btorrent.Config._CONFIG_DIR = CFG_DIR
+btorrent.Config._CONFIG_FILE = CFG_FILE
+
+
+class TestTorrentConfig(ut.TestCase):
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        CFG_FILE.unlink(True)
+        CFG_DIR.rmdir()
+
+    def test_and_save(self):
+        cfg0 = btorrent.Config()
+        cfg0.port = 1234
+        cfg0.udp_port = 5678
+        cfg0.num_want = 40
+        cfg0.proxies = {'abc': 'def'}
+        cfg0.save_options()
+
+        cfg1 = btorrent.Config()
+
+        self.assertEqual(1234, cfg1.port)
+        self.assertEqual(5678, cfg1.udp_port)
+        self.assertEqual(40, cfg1.num_want)
+        self.assertDictEqual({'abc': 'def'}, dict(cfg1.proxies))
+
 
 class TestTorrentClient(ut.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
         cls._client = btorrent.Client()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        CFG_FILE.unlink(True)
+        CFG_DIR.rmdir()
 
     def setUp(self) -> None:
         self._torrent = btorrent.Torrent(pathlib.Path('tests/files/test_0.torrent'))
@@ -34,7 +67,7 @@ class TestTorrentClient(ut.TestCase):
             self._client.set_proxy(proxy_host, proxy_port)
 
             self.assertEqual(self._client.proxies['http'], f'{host}:{port}',
-                             msg=f'{proxy_host}:{proxy_port}')
+                             msg=f'{proxy_host}:{proxy_port} <=> {self._client.proxies}')
             for tracker in self._client.trackers:
                 self.assertEqual(tracker.proxies['http'], f'{host}:{port}',
                                  msg=f'{proxy_host}:{proxy_port}')

@@ -1,3 +1,6 @@
+import appdirs
+import configparser
+import pathlib
 import secrets
 
 from typing import AnyStr, Dict, List, Set, Union
@@ -5,38 +8,97 @@ from typing import AnyStr, Dict, List, Set, Union
 import btorrent
 
 
+class Config:
+    _APP_DIRS = appdirs.AppDirs(btorrent.__app_name__)
+    _CONFIG_DIR = pathlib.Path(_APP_DIRS.user_config_dir)
+    _CONFIG_FILE = pathlib.Path(_CONFIG_DIR / 'config.ini')
+
+    _NETWORK = 'Network'
+    _PROXIES = 'Proxies'
+
+    def __init__(self):
+        self.config = configparser.ConfigParser()
+
+        self.config.add_section(self._NETWORK)
+        self.port = 6881
+        self.udp_port = 8881
+        self.num_want = 5
+
+        self.config.add_section(self._PROXIES)
+
+        self.config.read(self._CONFIG_FILE)
+
+        self.save_options()
+
+    def save_options(self):
+        self._CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        with self._CONFIG_FILE.open('w') as f:
+            self.config.write(f)
+
+    @property
+    def port(self) -> int:
+        return self.config.getint(self._NETWORK, 'port')
+
+    @port.setter
+    def port(self, val: int) -> None:
+        self.config.set(self._NETWORK, 'port', str(val))
+
+    @property
+    def udp_port(self) -> int:
+        return self.config.getint(self._NETWORK, 'udp_port')
+
+    @udp_port.setter
+    def udp_port(self, val: int) -> None:
+        self.config.set(self._NETWORK, 'udp_port', str(val))
+
+    @property
+    def num_want(self) -> int:
+        return self.config.getint(self._NETWORK, 'num_want')
+
+    @num_want.setter
+    def num_want(self, val: int) -> None:
+        self.config.set(self._NETWORK, 'num_want', str(val))
+
+    @property
+    def proxies(self) -> configparser.SectionProxy:
+        return self.config[self._PROXIES]
+
+    @proxies.setter
+    def proxies(self, val: Dict[str, str]) -> None:
+        self.config[self._PROXIES] = val
+
+
 class Client:
     def __init__(self) -> None:
         self.__trackers: Set[btorrent.Tracker] = set()
         self.__torrents: List[btorrent.Torrent] = []
-        self.__proxies: Dict[str, str] = {}
 
-        # settings
-        peer_prefix = f'-bPB{btorrent.__version__}-'.encode('ascii')
+        peer_prefix = f'-bT{btorrent.__version__}-'.encode('ascii')
         self.peer_id = peer_prefix + secrets.token_bytes(20 - len(peer_prefix))
-        self.port = 6881    # 6881-6889
-        self.udp_port = 8881    # 8881-8889
-        # self.ip =
-        self.numwant = 5
+        self.config = Config()
 
     @property
-    def trackers(self):
+    def trackers(self) -> Set[btorrent.Tracker]:
         return self.__trackers
 
     @property
-    def torrents(self):
+    def torrents(self) -> List[btorrent.Torrent]:
         return self.__torrents
 
     @property
-    def proxies(self):
-        return self.__proxies
+    def proxies(self) -> configparser.SectionProxy:
+        return self.config.proxies
+
+    @proxies.setter
+    def proxies(self, val: Dict[str, str]) -> None:
+        self.config.proxies = val
 
     def add_torrent(self, t: btorrent.Torrent) -> None:
         if t not in self.__torrents:
             self.__torrents.append(t)
             for lvl in t.announce_list:
                 for tracker in lvl:
-                    tracker.set_proxies(self.__proxies)
+                    tracker.set_proxies(self.proxies)
                     self.__trackers.add(tracker)
 
     def set_proxy(self, host: str = None, port: Union[int, AnyStr] = None) -> None:
@@ -56,9 +118,9 @@ class Client:
                     raise ValueError('Port is not specified')
             else:
                 host = f'{host}:{port}'
-            self.__proxies.update({'http': host})
+            self.proxies.update({'http': host})
         else:   # clear proxy
-            self.__proxies.pop('http')
+            self.proxies.pop('http')
 
         self._upd_proxy()
 
@@ -67,5 +129,6 @@ class Client:
     #               version: Union[int, AnyStr] = 5):
 
     def _upd_proxy(self) -> None:
+        self.config.save_options()
         for tracker in self.__trackers:
-            tracker.set_proxies(self.__proxies)
+            tracker.set_proxies(self.proxies)
