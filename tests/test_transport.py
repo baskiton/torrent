@@ -19,4 +19,4 @@ class TestTransportTracker(ut.TestCase):
 
 class TestTransportPeer(ut.TestCase):
     def test_utp(self):
-        self.assertTrue(transport.peer.UTP())
+        self.assertTrue(0)
