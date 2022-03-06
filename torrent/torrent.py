@@ -2,7 +2,7 @@ import pathlib
 import random
 import time
 
-from typing import Any, Callable, Dict, List, Union
+from typing import Any, Callable, List, Set, Union
 
 import torrent
 
@@ -12,7 +12,7 @@ class Torrent:
         if isinstance(tfile, pathlib.Path):
             tfile = torrent.TorrentFile.from_file(tfile)
 
-        self.peers: Dict[int, torrent.Peer] = {}
+        self.peers: Set[torrent.Peer] = set()
         self.announce_list: List[List[torrent.tracker.Tracker]] = []
         self.tfile = tfile
 
@@ -88,6 +88,4 @@ class Torrent:
             self.interval = response.interval
             self.seeders = response.seeders
             self.leechers = response.leechers
-            for peer in response.peers:
-                # TODO: check if this peer already in self.peers
-                self.peers[peer.id] = peer
+            self.peers.update(response.peers)   # `peer` is not added if already in `self.peers`

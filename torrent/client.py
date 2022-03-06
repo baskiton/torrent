@@ -1,9 +1,11 @@
 import secrets
 
+from typing import Sequence
+
 import torrent
 
 
-class TorrentClient:
+class Client:
     def __init__(self):
         self.__trackers = set()
         self.__torrents = set()
@@ -16,7 +18,7 @@ class TorrentClient:
         # self.ip =
         self.numwant = 5
 
-    def add_torrent(self):
+    def add_torrent(self, t: torrent.Torrent):
         pass
 
     def set_proxy(self):

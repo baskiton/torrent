@@ -1,8 +1,8 @@
-import unittest
+import unittest as ut
 
 from torrent.peer import Peer
 
 
-class TestPeer(unittest.TestCase):
+class TestPeer(ut.TestCase):
     def setUp(self):
         self._peer = Peer('localhost', 123)

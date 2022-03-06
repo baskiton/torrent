@@ -1,10 +1,10 @@
-import unittest
+import unittest as ut
 import urllib.parse
 
 from torrent import transport
 
 
-class TestTransportTracker(unittest.TestCase):
+class TestTransportTracker(ut.TestCase):
     def test_http_request(self):
         u = urllib.parse.urlparse('http://aaa.b/announce')
         params = {}
@@ -17,6 +17,6 @@ class TestTransportTracker(unittest.TestCase):
         self.assertTrue(0)
 
 
-class TestTransportPeer(unittest.TestCase):
+class TestTransportPeer(ut.TestCase):
     def test_utp(self):
         self.assertTrue(transport.peer.UTP())

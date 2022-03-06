@@ -20,7 +20,7 @@ import urllib.request
 import urllib.response
 
 from collections import namedtuple as nt
-from typing import AnyStr, List, Optional, Sequence, Tuple
+from typing import AnyStr, List, Optional, Sequence, Set, Tuple
 
 import torrent
 
@@ -298,7 +298,7 @@ class AnnounceResponse(Response):
         self.interval = interval
         self.leechers = leechers
         self.seeders = seeders
-        self.peers = peers or []
+        self.peers: List[torrent.Peer] = peers or []
         self.tracker_id = b''
 
     @classmethod
