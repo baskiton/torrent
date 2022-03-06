@@ -15,7 +15,7 @@ class Tracker:
         self.interval = 0
         self.last_announce_time = 0
 
-    def set_proxy(self, host: str, port: Union[int, AnyStr] = None):
+    def set_proxy(self, host: str, port: Union[int, AnyStr] = None) -> None:
         """
         >>> x = Tracker(...)
         >>> x.set_proxy('abc.com', 123)
@@ -41,11 +41,11 @@ class Tracker:
     #               user: str = None, password: str = None,
     #               version: Union[int, AnyStr] = 5):
 
-    def add_proxy(self, proxies: Dict[str, str]):
+    def add_proxy(self, proxies: Dict[str, str]) -> None:
         self.proxies.update(proxies)
         self._proxy_handler.__init__(self.proxies)
 
-    def clear_proxy(self, type: str):
+    def clear_proxy(self, type: str) -> None:
         self.proxies.pop(type)
         self._proxy_handler.__init__(self.proxies)
 

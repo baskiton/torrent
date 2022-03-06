@@ -49,7 +49,7 @@ class Request:
     def __init__(self,
                  url: urllib.parse.ParseResultBytes,
                  connection_id: int = None,
-                 **params):
+                 **params) -> None:
         self.url = url
         self.connection_id = connection_id
         self.transaction_id = None
@@ -111,7 +111,7 @@ class Request:
 class ConnectRequest(Request):
     _CONNECT_PROTOCOL_ID = 0x41727101980
 
-    def __init__(self, url: urllib.parse.ParseResultBytes):
+    def __init__(self, url: urllib.parse.ParseResultBytes) -> None:
         super(ConnectRequest, self).__init__(url, self._CONNECT_PROTOCOL_ID)
 
 
@@ -157,7 +157,7 @@ class AnnounceRequest(Request):
                  key: int = -1,
                  numwant: int = -1,
                  ip=0,
-                 port: int = 6881):
+                 port: int = 6881) -> None:
         super(AnnounceRequest, self).__init__(
             url,
             info_hash=info_hash,
@@ -196,7 +196,7 @@ class ScrapeRequest(Request):
     ACTION = _TPReqType.SCRAPE
     _REQ_FMT = '20s'
 
-    def __init__(self, url: urllib.parse.ParseResultBytes, info_hash: Sequence[bytes] = ()):
+    def __init__(self, url: urllib.parse.ParseResultBytes, info_hash: Sequence[bytes] = ()) -> None:
         u = list(url)
         if u[2].endswith(b'/announce'):
             u[2] = u[2][:-9] + b'/scrape'
@@ -294,7 +294,7 @@ class AnnounceResponse(Response):
     _RESP_LEN = struct.calcsize(_RESP_FMT)
     _PEER_FMT = '!IH'
 
-    def __init__(self, interval: int, leechers: int, seeders: int, peers: List[torrent.Peer] = None):
+    def __init__(self, interval: int, leechers: int, seeders: int, peers: List[torrent.Peer] = None) -> None:
         self.interval = interval
         self.leechers = leechers
         self.seeders = seeders
@@ -350,7 +350,7 @@ class ScrapeResponse(Response):
     _FILE_FMT = '!III'
     FILE_NT = nt('file', 'seeders completed leechers name info_hash', defaults=[b'', b''])
 
-    def __init__(self, files: List[FILE_NT] = None):
+    def __init__(self, files: List[FILE_NT] = None) -> None:
         self.files = files or []
 
     @classmethod
@@ -394,7 +394,7 @@ _RESP_ACTIONS_MATCH = {
 
 
 class UDPConnection:
-    def __init__(self, req: urllib.request.Request):
+    def __init__(self, req: urllib.request.Request) -> None:
         u = urllib.parse.urlsplit(req.full_url)
         if req.has_proxy():
             self.peer_addr = urllib.parse._splitnport(req.host, 80)
@@ -445,7 +445,7 @@ class UDPConnection:
 
         print('OK')
 
-    def _connect(self, con: mpcon.Connection, addr_info: Tuple):
+    def _connect(self, con: mpcon.Connection, addr_info: Tuple) -> None:
         af, socktype, proto, canonname, sa = addr_info
         con_req = ConnectRequest(urllib.parse.urlparse(
             f'udp://{self.peer_addr[0]}:{self.peer_addr[1]}'.encode('idna')))
@@ -522,7 +522,7 @@ class UDPConnection:
     def read(self) -> Response:
         return self.__response
 
-    def set_socks5_header(self, header: bytes):
+    def set_socks5_header(self, header: bytes) -> None:
         self.__header = header
 
 
@@ -544,7 +544,7 @@ class TrackerOpener(urllib.request.OpenerDirector):
         return x
 
 
-def build_opener(*handlers):
+def build_opener(*handlers) -> TrackerOpener:
     opener = TrackerOpener()
     default_classes = [urllib.request.ProxyHandler, urllib.request.UnknownHandler, urllib.request.HTTPHandler,
                        urllib.request.HTTPDefaultErrorHandler, urllib.request.HTTPRedirectHandler,

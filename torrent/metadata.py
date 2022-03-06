@@ -7,7 +7,7 @@ from torrent import bencode
 
 
 class TorrentMetadata:
-    def __init__(self, metadata: dict):
+    def __init__(self, metadata: dict) -> None:
         self.announce: bytes = metadata[b'announce']
         self.announce_list: Optional[List[List[bytes]]] = metadata.get(b'announce-list')
         x = metadata.get(b'comment')
@@ -34,7 +34,7 @@ class TorrentMetadata:
 
 class MetadataInfo:
     def __init__(self, pieces: bytes, piece_length: int, private: int,
-                 name: pathlib.Path, files: List['MetadataFile'], total_size: int, info_hash: bytes):
+                 name: pathlib.Path, files: List['MetadataFile'], total_size: int, info_hash: bytes) -> None:
         # common
         self.pieces = pieces
         self.piece_length = piece_length
@@ -50,7 +50,7 @@ class MetadataInfo:
         self.info_hash = info_hash
 
     @classmethod
-    def from_rawdata(cls, info: dict, encoding):
+    def from_rawdata(cls, info: dict, encoding) -> 'MetadataInfo':
         # common
         pieces = info.get(b'pieces')
         piece_length = int(info.get(b'piece length'))
@@ -79,10 +79,7 @@ class MetadataInfo:
 
 
 class MetadataFile:
-    def __init__(self, path: pathlib.Path, length: int, md5sum: bytes = None):
+    def __init__(self, path: pathlib.Path, length: int, md5sum: bytes = None) -> None:
         self.path = path
         self.length = length
         self.md5sum = md5sum
-
-    # def __repr__(self):
-    #     return f'MetadataFile<{self.path}; {self.length} bytes; md5={self.md5sum}>'

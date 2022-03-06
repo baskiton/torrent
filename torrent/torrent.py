@@ -8,7 +8,7 @@ import torrent
 
 
 class Torrent:
-    def __init__(self, tfile: Union[pathlib.Path, torrent.TorrentFile]):
+    def __init__(self, tfile: Union[pathlib.Path, torrent.TorrentFile]) -> None:
         if isinstance(tfile, pathlib.Path):
             tfile = torrent.TorrentFile.from_file(tfile)
 
@@ -36,6 +36,13 @@ class Torrent:
                 self.announce_list.append(x)
         else:
             self.announce_list.append([torrent.tracker.Tracker(tfile.metadata.announce)])
+
+    @property
+    def id(self) -> bytes:
+        return self.tfile.info_hash
+
+    def __eq__(self, other: 'Torrent') -> bool:
+        return self.id == other.id
 
     def start_download(self, peer_id: bytes, ip: str, port: int, udp_port: int, num_want: int):
         # TODO: STARTED is sent when a download first begins
@@ -68,8 +75,8 @@ class Torrent:
                     return result
 
     def _announce(self, event: torrent.tracker.transport.AnnounceEvent, peer_id: bytes,
-                  ip: str, port: int, udp_port: int, num_want: int):
-        response: torrent.transport.tracker.AnnounceResponse = self._send_request(
+                  ip: str, port: int, udp_port: int, num_want: int) -> None:
+        response: torrent.tracker.transport.AnnounceResponse = self._send_request(
             torrent.tracker.Tracker.announce,
             event=event,
             port=port,

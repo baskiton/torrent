@@ -6,7 +6,7 @@ import torrent
 
 
 class Client:
-    def __init__(self):
+    def __init__(self) -> None:
         self.__trackers = set()
         self.__torrents = set()
 
@@ -18,8 +18,8 @@ class Client:
         # self.ip =
         self.numwant = 5
 
-    def add_torrent(self, t: torrent.Torrent):
+    def add_torrent(self, t: torrent.Torrent) -> None:
         pass
 
-    def set_proxy(self):
+    def set_proxy(self) -> None:
         pass

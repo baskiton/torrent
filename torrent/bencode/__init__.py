@@ -2,7 +2,7 @@ import io
 import pathlib
 import string
 
-from typing import Any, AnyStr, Iterable, Mapping
+from typing import Any, AnyStr, Iterable, Mapping, Optional, Union
 
 _INT = b'i'
 _LIST = b'l'
@@ -69,7 +69,7 @@ _TYPES = {
 _TYPES.update({i.encode(): _decode_buffer for i in string.digits})
 
 
-def _decode(stream: io.BytesIO):
+def _decode(stream: io.BytesIO) -> Optional[Union[int, list, dict]]:
     t = stream.read(1)
     try:
         res = _TYPES[t](stream)
@@ -78,21 +78,21 @@ def _decode(stream: io.BytesIO):
     return res
 
 
-def decode_from_file(fname: pathlib.Path):
+def decode_from_file(fname: pathlib.Path) -> Optional[Union[int, list, dict]]:
     return _decode(io.BytesIO(fname.read_bytes()))
 
 
-def decode_from_buffer(buf: bytes):
+def decode_from_buffer(buf: bytes) -> Optional[Union[int, list, dict]]:
     return _decode(io.BytesIO(buf))
 
 
-def _encode_int(x: int, to: io.BytesIO):
+def _encode_int(x: int, to: io.BytesIO) -> None:
     to.write(_INT)
     to.write(str(int(x)).encode())
     to.write(_END)
 
 
-def _encode_buffer(x: AnyStr, to: io.BytesIO):
+def _encode_buffer(x: AnyStr, to: io.BytesIO) -> None:
     if isinstance(x, str):
         x = x.encode()
     elif not isinstance(x, bytes):
@@ -102,14 +102,14 @@ def _encode_buffer(x: AnyStr, to: io.BytesIO):
     to.write(x)
 
 
-def _encode_list(x: Iterable, to: io.BytesIO):
+def _encode_list(x: Iterable, to: io.BytesIO) -> None:
     to.write(_LIST)
     for i in x:
         _encode(i, to)
     to.write(_END)
 
 
-def _encode_dict(x: Mapping, to: io.BytesIO):
+def _encode_dict(x: Mapping, to: io.BytesIO) -> None:
     to.write(_DICT)
     # keys of dictionary must be sorted by lexicography
     for key in sorted(x):
@@ -118,7 +118,7 @@ def _encode_dict(x: Mapping, to: io.BytesIO):
     to.write(_END)
 
 
-def _encode(item: Any, to: io.BytesIO):
+def _encode(item: Any, to: io.BytesIO) -> None:
     if isinstance(item, int):
         _encode_int(item, to)
     elif isinstance(item, (bytes, str)):
