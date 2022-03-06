@@ -9,8 +9,8 @@ import torrent.transport.tracker as transport
 class Tracker:
     def __init__(self, tracker_addr: bytes, proxies: Dict[str, str] = None) -> None:
         self.tracker_addr = urllib.parse.urlparse(tracker_addr)
-        self.proxies = proxies
-        self._proxy_handler = urllib.request.ProxyHandler(proxies)
+        self.proxies = proxies or {}
+        self._proxy_handler = urllib.request.ProxyHandler(self.proxies)
 
         self.interval = 0
         self.last_announce_time = 0
@@ -25,11 +25,15 @@ class Tracker:
         ValueError: Port not specified
         """
 
+        if not host:
+            raise ValueError('Host is not specified')
+
         if port is None:
             if host.find(':') == -1:
-                raise ValueError('Port not specified')
+                raise ValueError('Port is not specified')
         else:
             host = f'{host}:{port}'
+
         self.proxies['http'] = host
         self.add_proxy({'http': host})
 

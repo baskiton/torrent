@@ -45,6 +45,8 @@ class Torrent:
         # TODO: ...
 
     def stop_download(self, peer_id: bytes, ip: str, port: int, udp_port: int):
+        # TODO: close all connections with peers
+
         self._announce(torrent.tracker.transport.AnnounceEvent.STOPPED, peer_id, ip, port, udp_port, 0)
 
     def pause_download(self):

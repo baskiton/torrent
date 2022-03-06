@@ -330,6 +330,7 @@ class AnnounceResponse(Response):
 
         return resp
 
+
 class ScrapeResponse(Response):
     """
     Offset          Size            Name            Value
@@ -443,7 +444,6 @@ class UDPConnection:
             raise ConnectionError(errno.EHOSTUNREACH, f'Tracker {self.peer_addr} is unreachable')
 
         print('OK')
-
 
     def _connect(self, con: mpcon.Connection, addr_info: Tuple):
         af, socktype, proto, canonname, sa = addr_info

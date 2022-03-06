@@ -6,10 +6,12 @@ import torrent
 
 
 class TestTorrent(ut.TestCase):
-    def test_file(self):
-        for p in glob.iglob('tests/files/*.torrent'):
-            fn = pathlib.Path(p)
+    def test_torrent(self):
+        path = pathlib.Path('tests/files/test_0.torrent')
+        tt_0 = torrent.Torrent(torrent.TorrentFile.from_file(path))
+        tt_1 = torrent.Torrent(path)
 
-            t = torrent.TorrentFile.from_file(fn)
-            self.assertTrue(t, msg=f'"{fn}"')
-            self.assertEqual(t.metadata.info.info_hash, t.info_hash)
+        for ilvl, lvl in enumerate(tt_0.announce_list):
+            for itrk, tracker in enumerate(lvl):
+                self.assertEqual(tracker.tracker_addr,
+                                 tt_1.announce_list[ilvl][itrk].tracker_addr)

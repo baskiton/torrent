@@ -17,5 +17,4 @@ class TorrentFile:
 
     @classmethod
     def from_file(cls, fname: pathlib.Path):
-        data = metadata.TorrentMetadata(bencode.decode_from_file(fname))
-        return cls(data)
+        return cls(metadata.TorrentMetadata(bencode.decode_from_file(fname)))
