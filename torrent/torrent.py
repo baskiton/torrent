@@ -38,11 +38,11 @@ class Torrent:
             self.announce_list.append([torrent.tracker.Tracker(tfile.metadata.announce)])
 
     @property
-    def id(self) -> bytes:
+    def info_hash(self) -> bytes:
         return self.tfile.info_hash
 
     def __eq__(self, other: 'Torrent') -> bool:
-        return self.id == other.id
+        return self.info_hash == other.info_hash
 
     def start_download(self, peer_id: bytes, ip: str, port: int, udp_port: int, num_want: int):
         # TODO: STARTED is sent when a download first begins
@@ -81,7 +81,7 @@ class Torrent:
             event=event,
             port=port,
             udp_port=udp_port,
-            info_hash=self.tfile.info_hash,
+            info_hash=self.info_hash,
             peer_id=peer_id,
             downloaded=self.downloaded,
             left=self.left,

@@ -9,44 +9,20 @@ import torrent.transport.tracker as transport
 class Tracker:
     def __init__(self, tracker_addr: bytes, proxies: Dict[str, str] = None) -> None:
         self.tracker_addr = urllib.parse.urlparse(tracker_addr)
-        self.proxies = proxies or {}
+        self.proxies: Dict[str, str] = proxies or {}
         self._proxy_handler = urllib.request.ProxyHandler(self.proxies)
 
         self.interval = 0
         self.last_announce_time = 0
 
-    def set_proxy(self, host: str, port: Union[int, AnyStr] = None) -> None:
-        """
-        >>> x = Tracker(...)
-        >>> x.set_proxy('abc.com', 123)
-        >>> x.set_proxy('abc.com', '123')
-        >>> x.set_proxy('abc.com:123')
-        >>> x.set_proxy('abc.com')
-        ValueError: Port not specified
-        """
+    def __hash__(self):
+        return hash(self.tracker_addr)
 
-        if not host:
-            raise ValueError('Host is not specified')
+    def __eq__(self, other: 'Tracker') -> bool:
+        return self.tracker_addr == other.tracker_addr
 
-        if port is None:
-            if host.find(':') == -1:
-                raise ValueError('Port is not specified')
-        else:
-            host = f'{host}:{port}'
-
-        self.proxies['http'] = host
-        self.add_proxy({'http': host})
-
-    # def set_socks(self, host: str, port: Union[int, AnyStr] = None,
-    #               user: str = None, password: str = None,
-    #               version: Union[int, AnyStr] = 5):
-
-    def add_proxy(self, proxies: Dict[str, str]) -> None:
-        self.proxies.update(proxies)
-        self._proxy_handler.__init__(self.proxies)
-
-    def clear_proxy(self, type: str) -> None:
-        self.proxies.pop(type)
+    def set_proxies(self, proxies: Dict[str, str]) -> None:
+        self.proxies = proxies
         self._proxy_handler.__init__(self.proxies)
 
     def _send_request(self, req: transport.Request) -> transport.Response:

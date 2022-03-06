@@ -1,14 +1,15 @@
 import secrets
 
-from typing import Sequence
+from typing import AnyStr, Dict, List, Set, Union
 
 import torrent
 
 
 class Client:
     def __init__(self) -> None:
-        self.__trackers = set()
-        self.__torrents = set()
+        self.__trackers: Set[torrent.Tracker] = set()
+        self.__torrents: List[torrent.Torrent] = []
+        self.__proxies: Dict[str, str] = {}
 
         # settings
         peer_prefix = f'-bPB{torrent.__version__}-'.encode('ascii')
@@ -18,8 +19,53 @@ class Client:
         # self.ip =
         self.numwant = 5
 
-    def add_torrent(self, t: torrent.Torrent) -> None:
-        pass
+    @property
+    def trackers(self):
+        return self.__trackers
 
-    def set_proxy(self) -> None:
-        pass
+    @property
+    def torrents(self):
+        return self.__torrents
+
+    @property
+    def proxies(self):
+        return self.__proxies
+
+    def add_torrent(self, t: torrent.Torrent) -> None:
+        if t not in self.__torrents:
+            self.__torrents.append(t)
+            for lvl in t.announce_list:
+                for tracker in lvl:
+                    tracker.set_proxies(self.__proxies)
+                    self.__trackers.add(tracker)
+
+    def set_proxy(self, host: str = None, port: Union[int, AnyStr] = None) -> None:
+        """
+        >>> x = Client()
+        >>> x.set_proxy('abc.com', 123)
+        >>> x.set_proxy('abc.com', '123')
+        >>> x.set_proxy('abc.com:123')
+        >>> x.set_proxy('abc.com')
+        ValueError: Port not specified
+        >>> x.set_proxy()   # clear proxy
+        """
+
+        if host:
+            if port is None:
+                if host.find(':') == -1:
+                    raise ValueError('Port is not specified')
+            else:
+                host = f'{host}:{port}'
+            self.__proxies.update({'http': host})
+        else:   # clear proxy
+            self.__proxies.pop('http')
+
+        self._upd_proxy()
+
+    # def set_socks(self, host: str, port: Union[int, AnyStr] = None,
+    #               user: str = None, password: str = None,
+    #               version: Union[int, AnyStr] = 5):
+
+    def _upd_proxy(self) -> None:
+        for tracker in self.__trackers:
+            tracker.set_proxies(self.__proxies)
