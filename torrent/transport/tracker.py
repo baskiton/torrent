@@ -1,9 +1,11 @@
 __all__ = (
-    'AnnounceResponse', 'ConnectResponse', 'ErrorResponse', 'ScrapeResponse',
-    'AnnounceEvent', 'TrackerTransport'
+    'Response', 'AnnounceResponse', 'ErrorResponse', 'ScrapeResponse',
+    'Request', 'AnnounceRequest', 'ScrapeRequest',
+    'AnnounceEvent'
 )
 
 import enum
+import errno
 import http.client
 import io
 import multiprocessing as mp
@@ -18,11 +20,9 @@ import urllib.request
 import urllib.response
 
 from collections import namedtuple as nt
-from typing import AnyStr, Dict, List, Optional, Sequence, Tuple, Union
+from typing import AnyStr, List, Optional, Sequence, Tuple
 
 import torrent
-
-from torrent import __version__, bencode
 
 
 @enum.unique
@@ -41,7 +41,7 @@ class _TPReqType(enum.IntEnum):
     ERROR = 3
 
 
-class _Request:
+class Request:
     ACTION = _TPReqType.CONNECT
     _COMMON_REQ_FMT = '!QII'
     _REQ_FMT = ''
@@ -71,7 +71,7 @@ class _Request:
                                      f'{self.url.query and "&" or "?"}'
                                      f'{urllib.parse.urlencode(self.params, True)}',
                                      method='GET')
-        req.add_header('User-agent', f'pyTorrent/{__version__} by baskiton')
+        req.add_header('User-agent', f'pyTorrent/{torrent.__version__} by baskiton')
         req.add_header('Connection', 'close')
         return req
 
@@ -108,14 +108,14 @@ class _Request:
         return int.from_bytes(secrets.token_bytes(4), 'big', signed=False)
 
 
-class ConnectRequest(_Request):
+class ConnectRequest(Request):
     _CONNECT_PROTOCOL_ID = 0x41727101980
 
     def __init__(self, url: urllib.parse.ParseResultBytes):
         super(ConnectRequest, self).__init__(url, self._CONNECT_PROTOCOL_ID)
 
 
-class AnnounceRequest(_Request):
+class AnnounceRequest(Request):
     """
     UDP Announce request
     Offset  Size    Name    Value
@@ -181,7 +181,7 @@ class AnnounceRequest(_Request):
         return super(AnnounceRequest, self).http()
 
 
-class ScrapeRequest(_Request):
+class ScrapeRequest(Request):
     """
     UDP Scrape request
     Offset          Size            Name            Value
@@ -207,22 +207,22 @@ class ScrapeRequest(_Request):
         super(ScrapeRequest, self).__init__(url, info_hash=info_hash)
 
 
-class _Response:
+class Response:
     ACTION = None
     _RESP_LEN = 0
     _COMMON_RESP_FMT = '!II'
     _COMMON_RESP_LEN = struct.calcsize(_COMMON_RESP_FMT)
 
     @classmethod
-    def from_buf(cls, buf: io.BytesIO) -> Optional['_Response']:
+    def from_buf(cls, buf: io.BytesIO) -> Optional['Response']:
         pass
 
     @classmethod
-    def from_bencode(cls, buf: bytes) -> Optional['_Response']:
+    def from_bencode(cls, buf: bytes) -> Optional['Response']:
         pass
 
     @classmethod
-    def build(cls, resp: bytes, transaction_id=0) -> Optional['_Response']:
+    def build(cls, resp: bytes, transaction_id=0) -> Optional['Response']:
         """
         Connect response
         Offset      Size            Name            Value
@@ -233,7 +233,7 @@ class _Response:
         8(0)
         """
         try:
-            resp = bencode.decode_from_buffer(resp)
+            resp = torrent.bencode.decode_from_buffer(resp)
         except (ValueError, TypeError, EOFError):
             if len(resp) >= cls._COMMON_RESP_LEN:
                 buf = io.BytesIO(resp)
@@ -248,7 +248,7 @@ class _Response:
             return (ScrapeResponse if b'files' in resp else AnnounceResponse).from_bencode(resp)
 
 
-class ConnectResponse(_Response):
+class ConnectResponse(Response):
     """
     Connect response
     Offset      Size            Name            Value
@@ -274,7 +274,7 @@ class ConnectResponse(_Response):
             return cls(*struct.unpack(cls._RESP_FMT, x))
 
 
-class AnnounceResponse(_Response):
+class AnnounceResponse(Response):
     """
     Offset          Size            Name            Value
     === common ==========================================
@@ -330,7 +330,7 @@ class AnnounceResponse(_Response):
 
         return resp
 
-class ScrapeResponse(_Response):
+class ScrapeResponse(Response):
     """
     Offset          Size            Name            Value
     === common ==========================================
@@ -365,7 +365,7 @@ class ScrapeResponse(_Response):
         )
 
 
-class ErrorResponse(_Response, ConnectionError):
+class ErrorResponse(Response, ConnectionError):
     """
     Offset      Size            Name            Value
     === common ======================================
@@ -404,7 +404,7 @@ class UDPConnection:
         self.connection_id: Optional[int] = None
 
         self.__header = b''
-        self.__response: Optional[_Response] = None
+        self.__response: Optional[Response] = None
 
     def connect(self) -> None:
         print(f'try connecting with {self.peer_addr}')
@@ -424,7 +424,7 @@ class UDPConnection:
                 continue
             thr_id, sock, resp = x
             sock: sk.socket
-            resp: _Response
+            resp: Response
 
             if not resp:
                 sock.close()
@@ -432,13 +432,16 @@ class UDPConnection:
                 continue
 
             self.sock = sock
-            self.peer_addr = sock.getpeername()
             self.connection_id = resp.connection_id
             break
 
         main_con.send('.')
         for t in ths.values():
             t.join()
+
+        if not self.sock:
+            raise ConnectionError(errno.EHOSTUNREACH, f'Tracker {self.peer_addr} is unreachable')
+
         print('OK')
 
 
@@ -460,7 +463,7 @@ class UDPConnection:
             for fd, evt in poller.poll(t):
                 if fd == sock.fileno():
                     x = sock.recv(65535)
-                    resp = _Response.build(x, con_req.transaction_id)
+                    resp = Response.build(x, con_req.transaction_id)
                     if (not resp
                             or (resp.ACTION != con_req.ACTION
                                 and not isinstance(resp, ErrorResponse))):
@@ -481,7 +484,7 @@ class UDPConnection:
         finally:
             self.__response = None
 
-    def send_request(self, req: _Request) -> Optional[_Response]:
+    def send_request(self, req: Request) -> Optional[Response]:
         if self.sock is None:
             self.connect()
 
@@ -491,7 +494,7 @@ class UDPConnection:
         self.__response = self._send_request(self.sock, req)
         return self.__response
 
-    def _send_request(self, con: sk.socket, req: _Request) -> Optional[_Response]:
+    def _send_request(self, con: sk.socket, req: Request) -> Optional[Response]:
         print(f'send {req.ACTION.name} t=0')
         for i in range(9):
             t = 15 * 2 ** i
@@ -505,18 +508,18 @@ class UDPConnection:
                 # TODO: log it?
                 continue
 
-            resp = _Response.build(resp, req.transaction_id)
+            resp = Response.build(resp, req.transaction_id)
             if (not resp
                     or (resp.ACTION != req.ACTION
                         and not isinstance(resp, ErrorResponse))):
                 continue
-
             return resp
+        raise ConnectionError(errno.EHOSTUNREACH, f'Tracker {self.peer_addr} is unreachable')
 
-    def get_response(self) -> _Response:
+    def get_response(self) -> Response:
         return self.__response
 
-    def read(self) -> _Response:
+    def read(self) -> Response:
         return self.__response
 
     def set_socks5_header(self, header: bytes):
@@ -534,10 +537,10 @@ class UDPHandler(urllib.request.BaseHandler):
 
 
 class TrackerOpener(urllib.request.OpenerDirector):
-    def open(self, fullurl, data=None, timeout=sk._GLOBAL_DEFAULT_TIMEOUT) -> _Response:
+    def open(self, fullurl, data=None, timeout=sk._GLOBAL_DEFAULT_TIMEOUT) -> Response:
         x = super(TrackerOpener, self).open(fullurl, data, timeout).read()
         if isinstance(x, bytes):
-            return _Response.build(x)
+            return Response.build(x)
         return x
 
 
@@ -568,48 +571,3 @@ def build_opener(*handlers):
             h = h()
         opener.add_handler(h)
     return opener
-
-
-class TrackerTransport:
-    def __init__(self, tracker_addr: bytes, proxies: Dict[str, str] = None):
-        self.tracker_addr = urllib.parse.urlparse(tracker_addr)
-        self.proxies = proxies
-        self._proxy_handler = urllib.request.ProxyHandler(proxies)
-
-        self.__connection_id = None
-        self.__connection_id_start = 0
-        self.__udp_ip = ''
-        self.__udp_port = self.tracker_addr.port
-
-    def add_proxy(self, proxies: Dict[str, str]):
-        self.proxies.update(proxies)
-        self._proxy_handler.__init__(self.proxies)
-
-    def clear_proxy(self, type: str):
-        self.proxies.pop(type)
-        self._proxy_handler.__init__(self.proxies)
-
-    def _send_request(self, req: _Request) -> _Response:
-        opener = build_opener(self._proxy_handler)
-        r = opener.open(req.get_req())
-        if isinstance(r, ErrorResponse):
-            raise r
-        return r
-
-    def announce(self,
-                 info_hash: bytes,
-                 peer_id: bytes,
-                 downloaded: int,
-                 left: int,
-                 uploaded: int,
-                 event: AnnounceEvent = AnnounceEvent.NONE,
-                 key: int = -1,
-                 numwant: int = -1,
-                 ip=0,
-                 port: int = 6881) -> Union[_Response, AnnounceResponse]:
-        return self._send_request(AnnounceRequest(self.tracker_addr, info_hash, peer_id,
-                                                  downloaded, left, uploaded, event,
-                                                  key, numwant, ip, port))
-
-    def scrape(self, info_hashes: Sequence[bytes] = ()) -> Union[_Response, ScrapeResponse]:
-        return self._send_request(ScrapeRequest(self.tracker_addr, info_hashes))
