@@ -1,6 +1,6 @@
 import unittest as ut
 
-from torrent.peer import Peer
+from btorrent import Peer
 
 
 class TestPeer(ut.TestCase):

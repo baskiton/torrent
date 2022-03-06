@@ -1,9 +1,9 @@
 import urllib.parse
 import urllib.request
 
-from typing import AnyStr, Dict, Sequence, Union
+from typing import Dict, Sequence, Union
 
-import torrent.transport.tracker as transport
+import btorrent.transport.tracker as transport
 
 
 class Tracker:

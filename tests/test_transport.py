@@ -1,7 +1,7 @@
 import unittest as ut
 import urllib.parse
 
-from torrent import transport
+from btorrent import transport
 
 
 class TestTransportTracker(ut.TestCase):

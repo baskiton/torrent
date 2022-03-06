@@ -22,7 +22,7 @@ import urllib.response
 from collections import namedtuple as nt
 from typing import AnyStr, List, Optional, Sequence, Set, Tuple
 
-import torrent
+import btorrent
 
 
 @enum.unique
@@ -71,7 +71,7 @@ class Request:
                                      f'{self.url.query and "&" or "?"}'
                                      f'{urllib.parse.urlencode(self.params, True)}',
                                      method='GET')
-        req.add_header('User-agent', f'pyTorrent/{torrent.__version__} by baskiton')
+        req.add_header('User-agent', f'pyTorrent/{btorrent.__version__} by baskiton')
         req.add_header('Connection', 'close')
         return req
 
@@ -233,7 +233,7 @@ class Response:
         8(0)
         """
         try:
-            resp = torrent.bencode.decode_from_buffer(resp)
+            resp = btorrent.bencode.decode_from_buffer(resp)
         except (ValueError, TypeError, EOFError):
             if len(resp) >= cls._COMMON_RESP_LEN:
                 buf = io.BytesIO(resp)
@@ -294,11 +294,11 @@ class AnnounceResponse(Response):
     _RESP_LEN = struct.calcsize(_RESP_FMT)
     _PEER_FMT = '!IH'
 
-    def __init__(self, interval: int, leechers: int, seeders: int, peers: List[torrent.Peer] = None) -> None:
+    def __init__(self, interval: int, leechers: int, seeders: int, peers: List[btorrent.Peer] = None) -> None:
         self.interval = interval
         self.leechers = leechers
         self.seeders = seeders
-        self.peers: List[torrent.Peer] = peers or []
+        self.peers: List[btorrent.Peer] = peers or []
         self.tracker_id = b''
 
     @classmethod
@@ -307,7 +307,7 @@ class AnnounceResponse(Response):
         if len(x) >= cls._RESP_LEN:
             resp = cls(*struct.unpack(cls._RESP_FMT, x))
             for ip, port in struct.iter_unpack(cls._PEER_FMT, buf.read()):
-                resp.peers.append(torrent.Peer(ip, port))
+                resp.peers.append(btorrent.Peer(ip, port))
             return resp
 
     @classmethod
@@ -321,11 +321,11 @@ class AnnounceResponse(Response):
         peers = data.get(b'peers')
         if isinstance(peers, bytes):
             # compact model
-            resp.peers = list(torrent.Peer(ip, port)
+            resp.peers = list(btorrent.Peer(ip, port)
                               for ip, port in struct.iter_unpack('!IH', peers))
         elif isinstance(peers, list):
             # dictionary model
-            resp.peers = list(torrent.Peer(peer[b'ip'], peer[b'port'], peer.get(b'peer id'))
+            resp.peers = list(btorrent.Peer(peer[b'ip'], peer[b'port'], peer.get(b'peer id'))
                               for peer in peers)
 
         return resp

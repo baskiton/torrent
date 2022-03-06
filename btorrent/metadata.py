@@ -3,7 +3,7 @@ import pathlib
 
 from typing import List, Optional
 
-from torrent import bencode
+from btorrent import bencode
 
 
 class TorrentMetadata:

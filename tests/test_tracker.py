@@ -1,6 +1,6 @@
 import unittest as ut
 
-import torrent
+import btorrent
 
 
 class TestTracker(ut.TestCase):
@@ -17,7 +17,7 @@ class TestTracker(ut.TestCase):
         )
 
     def setUp(self):
-        self._trackers = [torrent.Tracker(url) for url in self._urls]
+        self._trackers = [btorrent.Tracker(url) for url in self._urls]
 
     def test_announce(self):
         # TODO

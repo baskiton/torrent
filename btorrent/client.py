@@ -2,17 +2,17 @@ import secrets
 
 from typing import AnyStr, Dict, List, Set, Union
 
-import torrent
+import btorrent
 
 
 class Client:
     def __init__(self) -> None:
-        self.__trackers: Set[torrent.Tracker] = set()
-        self.__torrents: List[torrent.Torrent] = []
+        self.__trackers: Set[btorrent.Tracker] = set()
+        self.__torrents: List[btorrent.Torrent] = []
         self.__proxies: Dict[str, str] = {}
 
         # settings
-        peer_prefix = f'-bPB{torrent.__version__}-'.encode('ascii')
+        peer_prefix = f'-bPB{btorrent.__version__}-'.encode('ascii')
         self.peer_id = peer_prefix + secrets.token_bytes(20 - len(peer_prefix))
         self.port = 6881    # 6881-6889
         self.udp_port = 8881    # 8881-8889
@@ -31,7 +31,7 @@ class Client:
     def proxies(self):
         return self.__proxies
 
-    def add_torrent(self, t: torrent.Torrent) -> None:
+    def add_torrent(self, t: btorrent.Torrent) -> None:
         if t not in self.__torrents:
             self.__torrents.append(t)
             for lvl in t.announce_list:

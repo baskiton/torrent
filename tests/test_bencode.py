@@ -6,7 +6,7 @@ import secrets
 import string
 import unittest as ut
 
-from torrent import bencode
+from btorrent import bencode
 
 
 class TestBencode(ut.TestCase):

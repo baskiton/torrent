@@ -1,6 +1,6 @@
 import pathlib
 
-from torrent import bencode, metadata
+from btorrent import bencode, metadata
 
 
 class TorrentFile:

@@ -2,7 +2,7 @@ import hashlib
 import pathlib
 import unittest as ut
 
-from torrent import metadata
+from btorrent import metadata
 
 
 class TestMetadata(ut.TestCase):
