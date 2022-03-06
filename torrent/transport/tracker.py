@@ -399,7 +399,7 @@ class UDPConnection:
         if req.has_proxy():
             self.peer_addr = urllib.parse._splitnport(req.host, 80)
         else:
-            self.peer_addr: Optional[Tuple[AnyStr, int]] = u.hostname, u.port
+            self.peer_addr: Tuple[AnyStr, int] = (u.hostname, u.port)
 
         self.sock: Optional[sk.socket] = None
         self.connection_id: Optional[int] = None
