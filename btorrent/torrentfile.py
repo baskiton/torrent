@@ -4,8 +4,9 @@ from btorrent import bencode, metadata
 
 
 class TorrentFile:
-    def __init__(self, data: metadata.TorrentMetadata) -> None:
+    def __init__(self, data: metadata.TorrentMetadata, file_name: pathlib.Path = None) -> None:
         self.metadata = data
+        self.file_name = file_name
 
     @property
     def info_hash(self) -> bytes:
@@ -17,4 +18,4 @@ class TorrentFile:
 
     @classmethod
     def from_file(cls, fname: pathlib.Path) -> 'TorrentFile':
-        return cls(metadata.TorrentMetadata(bencode.decode_from_file(fname)))
+        return cls(metadata.TorrentMetadata(bencode.decode_from_file(fname)), fname)

@@ -9,6 +9,9 @@ class Peer:
         self.status = None
         self.id = hashlib.sha256(str((self.ip, self.port)).encode()).digest()
 
+    def __hash__(self):
+        return int.from_bytes(self.id, 'little')
+
     def __eq__(self, other: 'Peer') -> bool:
         return self.id == other.id
 

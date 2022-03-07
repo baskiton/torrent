@@ -408,13 +408,15 @@ class UDPConnection:
         self.__response: Optional[Response] = None
 
     def connect(self) -> None:
-        print(f'try connecting with {self.peer_addr}')
+        # TODO: log it
+        print(f'connecting with {self.peer_addr}...')
 
         main_con, child_con = mp.Pipe(True)
 
         ths = {}
         for addr_info in sk.getaddrinfo(*self.peer_addr, 0, sk.SOCK_DGRAM, sk.IPPROTO_UDP):
-            t = threading.Thread(target=self._connect, args=(child_con, addr_info), daemon=True)
+            t = threading.Thread(name=self.__class__.__name__, daemon=True,
+                                 target=self._connect, args=(child_con, addr_info))
             t.start()
             ths[t.ident] = t
 
@@ -424,8 +426,6 @@ class UDPConnection:
                 ths.pop(x, None)
                 continue
             thr_id, sock, resp = x
-            sock: sk.socket
-            resp: Response
 
             if not resp:
                 sock.close()
@@ -443,34 +443,42 @@ class UDPConnection:
         if not self.sock:
             raise ConnectionError(errno.EHOSTUNREACH, f'Tracker {self.peer_addr} is unreachable')
 
-        print('OK')
+        # TODO: log it
+        print(f'{self.peer_addr} OK')
 
     def _connect(self, con: mpcon.Connection, addr_info: Tuple) -> None:
         af, socktype, proto, canonname, sa = addr_info
         con_req = ConnectRequest(urllib.parse.urlparse(
             f'udp://{self.peer_addr[0]}:{self.peer_addr[1]}'.encode('idna')))
-        poller = select.poll()
-        sock = sk.socket(af, socktype, proto)
 
+        sock = sk.socket(af, socktype, proto)
+        sock.connect(sa)
+
+        poller = select.poll()
         poller.register(sock.fileno(), select.POLLIN)
         poller.register(con.fileno(), select.POLLIN)
 
-        sock.connect(sa)
         for i in range(9):
             t = 15000 * 2 ** i  # ms
             sock.sendall(self.__header + con_req.udp())
 
             for fd, evt in poller.poll(t):
                 if fd == sock.fileno():
-                    x = sock.recv(65535)
-                    resp = Response.build(x, con_req.transaction_id)
-                    if (not resp
-                            or (resp.ACTION != con_req.ACTION
-                                and not isinstance(resp, ErrorResponse))):
-                        break
-                    if isinstance(resp, ErrorResponse):
-                        raise resp
-                    con.send((threading.get_ident(), sock, resp))
+                    try:
+                        x = sock.recv(65535)
+                        resp = Response.build(x, con_req.transaction_id)
+                        if (not resp
+                                or (resp.ACTION != con_req.ACTION
+                                    and not isinstance(resp, ErrorResponse))):
+                            break
+                        if isinstance(resp, ErrorResponse):
+                            raise resp
+                    except (ErrorResponse, ConnectionError) as e:
+                        # TODO: log it
+                        print(f'{sa}: {e}')
+                        sock.close()
+                    else:
+                        con.send((threading.get_ident(), sock, resp))
                 else:
                     sock.close()
                 return
@@ -495,7 +503,9 @@ class UDPConnection:
         return self.__response
 
     def _send_request(self, con: sk.socket, req: Request) -> Optional[Response]:
+        # TODO: log it
         print(f'send {req.ACTION.name} t=0')
+
         for i in range(9):
             t = 15 * 2 ** i
             con.settimeout(t)
@@ -504,8 +514,8 @@ class UDPConnection:
             try:
                 resp = con.recv(65535)
             except sk.timeout:
+                # TODO: log it
                 print(f'send {req.ACTION.name} {t=}')
-                # TODO: log it?
                 continue
 
             resp = Response.build(resp, req.transaction_id)
@@ -529,7 +539,6 @@ class UDPConnection:
 class UDPHandler(urllib.request.BaseHandler):
 
     def udp_open(self, req: urllib.request.Request) -> UDPConnection:
-        print('udp_open', req.full_url)
         con = UDPConnection(req)
         con.connect()
         con.send_request(req.data)

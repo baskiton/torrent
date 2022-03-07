@@ -38,6 +38,10 @@ class Torrent:
             self.announce_list.append([btorrent.tracker.Tracker(tfile.metadata.announce)])
 
     @property
+    def file_name(self):
+        return self.tfile.file_name
+
+    @property
     def info_hash(self) -> bytes:
         return self.tfile.info_hash
 

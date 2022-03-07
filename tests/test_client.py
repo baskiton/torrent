@@ -3,28 +3,30 @@ import unittest as ut
 
 import btorrent
 
-CFG_DIR = pathlib.Path('tests/tmp')
-CFG_FILE = pathlib.Path(CFG_DIR / 'test_cfg.ini')
-btorrent.Config._CONFIG_DIR = CFG_DIR
-btorrent.Config._CONFIG_FILE = CFG_FILE
+DATA_DIR = pathlib.Path('tests/tmp')
+CFG_FILE = pathlib.Path(DATA_DIR / btorrent.Config._CONFIG_FILE)
+btorrent.Client._DATA_DIR = DATA_DIR
 
 
 class TestTorrentConfig(ut.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
 
     @classmethod
     def tearDownClass(cls) -> None:
         CFG_FILE.unlink(True)
-        CFG_DIR.rmdir()
+        DATA_DIR.rmdir()
 
     def test_and_save(self):
-        cfg0 = btorrent.Config()
+        cfg0 = btorrent.Config(DATA_DIR)
         cfg0.port = 1234
         cfg0.udp_port = 5678
         cfg0.num_want = 40
         cfg0.proxies = {'abc': 'def'}
         cfg0.save_options()
 
-        cfg1 = btorrent.Config()
+        cfg1 = btorrent.Config(DATA_DIR)
 
         self.assertEqual(1234, cfg1.port)
         self.assertEqual(5678, cfg1.udp_port)
@@ -41,7 +43,7 @@ class TestTorrentClient(ut.TestCase):
     @classmethod
     def tearDownClass(cls) -> None:
         CFG_FILE.unlink(True)
-        CFG_DIR.rmdir()
+        DATA_DIR.rmdir()
 
     def setUp(self) -> None:
         self._torrent = btorrent.Torrent(pathlib.Path('tests/files/test_0.torrent'))

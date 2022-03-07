@@ -9,15 +9,14 @@ import btorrent
 
 
 class Config:
-    _APP_DIRS = appdirs.AppDirs(btorrent.__app_name__)
-    _CONFIG_DIR = pathlib.Path(_APP_DIRS.user_config_dir)
-    _CONFIG_FILE = pathlib.Path(_CONFIG_DIR / 'config.ini')
+    _CONFIG_FILE = pathlib.Path('config.ini')
 
     _NETWORK = 'Network'
     _PROXIES = 'Proxies'
 
-    def __init__(self):
+    def __init__(self, cfg_dir: pathlib.Path):
         self.config = configparser.ConfigParser(allow_no_value=True)
+        self.config_file = cfg_dir / self._CONFIG_FILE
 
         # default options
         self.config.add_section(self._NETWORK)
@@ -32,7 +31,6 @@ class Config:
         self.save_options()
 
     def save_options(self):
-        self._CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         with self._CONFIG_FILE.open('w') as f:
             self.config.write(f)
 
@@ -70,13 +68,18 @@ class Config:
 
 
 class Client:
+    _APP_DIRS = appdirs.AppDirs(btorrent.__app_name__)
+    _DATA_DIR = pathlib.Path(_APP_DIRS.user_data_dir)
+
     def __init__(self) -> None:
         self.__trackers: Set[btorrent.Tracker] = set()
         self.__torrents: List[btorrent.Torrent] = []
 
         peer_prefix = f'-bT{btorrent.__version__}-'.encode('ascii')
         self.peer_id = peer_prefix + secrets.token_bytes(20 - len(peer_prefix))
-        self.config = Config()
+
+        self._DATA_DIR.mkdir(parents=True, exist_ok=True)
+        self.config = Config(self._DATA_DIR)
 
     @property
     def trackers(self) -> Set[btorrent.Tracker]:
