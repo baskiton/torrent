@@ -17,8 +17,9 @@ class Config:
     _PROXIES = 'Proxies'
 
     def __init__(self):
-        self.config = configparser.ConfigParser()
+        self.config = configparser.ConfigParser(allow_no_value=True)
 
+        # default options
         self.config.add_section(self._NETWORK)
         self.port = 6881
         self.udp_port = 8881
