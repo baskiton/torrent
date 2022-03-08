@@ -27,10 +27,7 @@ class Tracker:
 
     def _send_request(self, req: transport.Request) -> transport.Response:
         opener = transport.build_opener(self._proxy_handler)
-        r = opener.open(req.get_req())
-        if isinstance(r, transport.ErrorResponse):
-            raise r
-        return r
+        return opener.open(req.get_req())
 
     def announce(self,
                  info_hash: bytes,

@@ -169,7 +169,7 @@ class AnnounceRequest(Request):
             ip=ip,
             key=key,
             numwant=numwant,
-            port=port
+            port=port,
         )
 
     def http(self) -> urllib.request.Request:
@@ -408,9 +408,6 @@ class UDPConnection:
         self.__response: Optional[Response] = None
 
     def connect(self) -> None:
-        # TODO: log it
-        print(f'connecting with {self.peer_addr}...')
-
         main_con, child_con = mp.Pipe(True)
 
         ths = {}
@@ -442,9 +439,6 @@ class UDPConnection:
 
         if not self.sock:
             raise ConnectionError(errno.EHOSTUNREACH, f'Tracker {self.peer_addr} is unreachable')
-
-        # TODO: log it
-        print(f'{self.peer_addr} OK')
 
     def _connect(self, con: mpcon.Connection, addr_info: Tuple) -> None:
         af, socktype, proto, canonname, sa = addr_info
@@ -547,9 +541,17 @@ class UDPHandler(urllib.request.BaseHandler):
 
 class TrackerOpener(urllib.request.OpenerDirector):
     def open(self, fullurl, data=None, timeout=sk._GLOBAL_DEFAULT_TIMEOUT) -> Response:
+        url = f'<{fullurl.type}://{fullurl.host}>'
+        print(f'Connecting with {url}...')
         x = super(TrackerOpener, self).open(fullurl, data, timeout).read()
+
         if isinstance(x, bytes):
-            return Response.build(x)
+            x = Response.build(x)
+
+        if isinstance(x, ErrorResponse):
+            raise x
+
+        print(f'{url} OK')
         return x
 
 

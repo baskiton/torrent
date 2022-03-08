@@ -48,17 +48,17 @@ class Torrent:
     def __eq__(self, other: 'Torrent') -> bool:
         return self.info_hash == other.info_hash
 
-    def start_download(self, peer_id: bytes, ip: str, port: int, udp_port: int, num_want: int):
+    def start_download(self, peer_id: bytes, port: int, udp_port: int, num_want: int, ip: str = 0):
         # TODO: STARTED is sent when a download first begins
-        event = btorrent.tracker.transport.AnnounceEvent.NONE
+        event = btorrent.tracker.transport.AnnounceEvent.STARTED
 
-        self._announce(event, peer_id, ip, port, udp_port, num_want)
+        self._announce(event, peer_id, port, udp_port, num_want, ip)
         # TODO: ...
 
-    def stop_download(self, peer_id: bytes, ip: str, port: int, udp_port: int):
+    def stop_download(self, peer_id: bytes, port: int, udp_port: int, ip: str = 0):
         # TODO: close all connections with peers
 
-        self._announce(btorrent.tracker.transport.AnnounceEvent.STOPPED, peer_id, ip, port, udp_port, 0)
+        self._announce(btorrent.tracker.transport.AnnounceEvent.STOPPED, peer_id, port, udp_port, 0, ip)
 
     def pause_download(self):
         pass
@@ -71,15 +71,16 @@ class Torrent:
                 except (ConnectionError, OSError) as e:
                     # TODO: log it
                     print(f'{e.__class__.__name__}: "{e}" for '
-                          f'"{tracker.tracker_addr.geturl().decode("ascii")}"')
+                          f'<{tracker.tracker_addr.geturl().decode("ascii")}>')
                     continue
+
                 if result:
                     lvl.pop(idx)
                     lvl.insert(0, tracker)
                     return result
 
     def _announce(self, event: btorrent.tracker.transport.AnnounceEvent, peer_id: bytes,
-                  ip: str, port: int, udp_port: int, num_want: int) -> None:
+                  port: int, udp_port: int, num_want: int, ip: str = 0) -> None:
         response: btorrent.tracker.transport.AnnounceResponse = self._send_request(
             btorrent.tracker.Tracker.announce,
             event=event,
