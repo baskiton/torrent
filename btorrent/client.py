@@ -9,14 +9,14 @@ import btorrent
 
 
 class Config:
-    _CONFIG_FILE = pathlib.Path('config.ini')
+    _CONFIG_FILE_NAME = 'config.ini'
 
     _NETWORK = 'Network'
     _PROXIES = 'Proxies'
 
     def __init__(self, cfg_dir: pathlib.Path):
         self.config = configparser.ConfigParser(allow_no_value=True)
-        self.config_file = cfg_dir / self._CONFIG_FILE
+        self.config_file = cfg_dir / self._CONFIG_FILE_NAME
 
         # default options
         self.config.add_section(self._NETWORK)
@@ -26,12 +26,12 @@ class Config:
 
         self.config.add_section(self._PROXIES)
 
-        self.config.read(self._CONFIG_FILE)
+        self.config.read(self.config_file)
 
         self.save_options()
 
     def save_options(self):
-        with self._CONFIG_FILE.open('w') as f:
+        with self.config_file.open('w') as f:
             self.config.write(f)
 
     @property

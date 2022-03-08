@@ -4,7 +4,7 @@ import unittest as ut
 import btorrent
 
 DATA_DIR = pathlib.Path('tests/tmp')
-CFG_FILE = pathlib.Path(DATA_DIR / btorrent.Config._CONFIG_FILE)
+CFG_FILE = pathlib.Path(DATA_DIR / btorrent.Config._CONFIG_FILE_NAME)
 btorrent.Client._DATA_DIR = DATA_DIR
 
 
