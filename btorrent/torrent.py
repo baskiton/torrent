@@ -56,7 +56,8 @@ class Torrent:
         # TODO: ...
 
     def stop_download(self, peer_id: bytes, port: int, udp_port: int, ip: str = 0):
-        # TODO: close all connections with peers
+        for peer in self.peers:
+            peer.connection.disconnect()
 
         self._announce(btorrent.tracker.transport.AnnounceEvent.STOPPED, peer_id, port, udp_port, 0, ip)
 

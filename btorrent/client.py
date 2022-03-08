@@ -74,6 +74,7 @@ class Client:
     def __init__(self) -> None:
         self.__trackers: Set[btorrent.Tracker] = set()
         self.__torrents: List[btorrent.Torrent] = []
+        self.state = btorrent.transport.peer.PeerState.CHOKED
 
         peer_prefix = f'-bT{btorrent.__version__}-'.encode('ascii')
         self.peer_id = peer_prefix + secrets.token_bytes(20 - len(peer_prefix))
@@ -99,6 +100,7 @@ class Client:
 
     def add_torrent(self, t: btorrent.Torrent) -> None:
         if t not in self.__torrents:
+            # TODO: add torrent-data to data directory
             self.__torrents.append(t)
             for lvl in t.announce_list:
                 for tracker in lvl:
