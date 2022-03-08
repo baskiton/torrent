@@ -51,7 +51,7 @@ def _decode_dict(stream: io.BytesIO) -> dict:
     while k is not None:
         if not isinstance(k, bytes):
             raise TypeError(f'`bytes` expected, got {type(k)} instead. {k}')
-        res[k] = _decode(stream)
+        res[k.lower()] = _decode(stream)
         k = _decode(stream)
     return res
 

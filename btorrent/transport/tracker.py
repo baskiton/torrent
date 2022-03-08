@@ -71,7 +71,7 @@ class Request:
                                      f'{self.url.query and "&" or "?"}'
                                      f'{urllib.parse.urlencode(self.params, True)}',
                                      method='GET')
-        req.add_header('User-agent', f'pyTorrent/{btorrent.__version__} by baskiton')
+        req.add_header('User-agent', f'{btorrent.__app_name__}/{btorrent.__version__} by baskiton')
         req.add_header('Connection', 'close')
         return req
 
