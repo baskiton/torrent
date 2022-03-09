@@ -1,5 +1,6 @@
 import enum
 import ipaddress
+import re
 import struct
 import socket as sk
 
@@ -23,11 +24,12 @@ class PeerState(enum.IntEnum):
 
 
 PROTOCOL_NAME_v10 = b'BitTorrent protocol'  # BitTorrent v1.0
+PROTOCOL_V10 = 1
 PROTO_VER_MAP = {
-    1: PROTOCOL_NAME_v10,
+    PROTOCOL_V10: PROTOCOL_NAME_v10,
 }
 PROTOCOL_VERS = {
-    len(PROTOCOL_NAME_v10): 1
+    len(PROTOCOL_NAME_v10): PROTOCOL_V10
 }
 
 
@@ -35,13 +37,22 @@ class WrongMessageError(ValueError):
     pass
 
 
+class _MessageBytes(bytes):
+    @property
+    def len(self) -> int:
+        return len(self)
+
+
 class Message:
     MESSAGE_ID = None
+    BASE_LENGTH = 0
+    PAYLOAD_OFFSET = 5
     PAYLOAD_FMT = ''
+    _RE = re.compile(r'(.*)({\d+\.len})(.*)')
+    _SUB = r'\1{}\3'
 
-    def __init__(self, length_prefix: int, payload_fmt: str = '', *payload) -> None:
+    def __init__(self, length_prefix: int = 0, *payload) -> None:
         self.length_prefix = length_prefix
-        self.payload_fmt = payload_fmt
         self.payload = payload
 
     def to_bytes(self) -> bytes:
@@ -50,7 +61,7 @@ class Message:
         if self.MESSAGE_ID is not None:
             fmt.append('B')
             args.append(self.MESSAGE_ID)
-        fmt.append(self.payload_fmt)
+        fmt.append(self.PAYLOAD_FMT.format(*self.payload))
         args.extend(self.payload)
 
         return struct.pack(''.join(fmt), *args)
@@ -76,123 +87,195 @@ class Message:
         else:
             msg = msg_ids.get(msg_id, Handshake)
 
-        return msg.from_bytes(buf)
+        return msg._from_bytes(buf)
+
+    @classmethod
+    def _from_bytes(cls, buf: bytes) -> 'Message':
+        # return cls()
+        length = struct.unpack_from('!I', buf)[0]
+        fmt = cls._RE.sub(cls._SUB, cls.PAYLOAD_FMT).format(length - cls.BASE_LENGTH)
+
+        return cls(*struct.unpack_from(f'!{fmt}', buf, cls.PAYLOAD_OFFSET))
 
 
 class KeepAlive(Message):
+    BASE_LENGTH = 0
+    PAYLOAD_OFFSET = 0
 
-    @classmethod
-    def from_bytes(cls, buf: bytes) -> 'KeepAlive':
-        try:
-            if not struct.unpack_from('!I', buf):
-                return cls(0)
-        except struct.error:
-            pass
-        raise WrongMessageError
+    def __init__(self):
+        super().__init__(self.BASE_LENGTH)
 
 
 class Choke(Message):
     MESSAGE_ID = 0
+    BASE_LENGTH = 1
 
     def __init__(self):
-        super().__init__(1)
+        super().__init__(self.BASE_LENGTH)
 
 
 class UnChoke(Message):
     MESSAGE_ID = 1
+    BASE_LENGTH = 1
 
     def __init__(self):
-        super().__init__(1)
+        super().__init__(self.BASE_LENGTH)
 
 
 class Interested(Message):
     MESSAGE_ID = 2
+    BASE_LENGTH = 1
 
     def __init__(self):
-        super().__init__(1)
+        super().__init__(self.BASE_LENGTH)
 
 
 class NotInterested(Message):
     MESSAGE_ID = 3
+    BASE_LENGTH = 1
 
     def __init__(self):
-        super().__init__(1)
+        super().__init__(self.BASE_LENGTH)
 
 
 class Have(Message):
     MESSAGE_ID = 4
+    BASE_LENGTH = 5
+    PAYLOAD_FMT = 'I'
 
     def __init__(self, piece_index: int):
-        super().__init__(5, 'I', piece_index)
+        super().__init__(self.BASE_LENGTH, piece_index)
+
+    @property
+    def piece_index(self) -> int:
+        return self.payload[0]
 
 
 class Bitfield(Message):
     MESSAGE_ID = 5
+    BASE_LENGTH = 1
+    PAYLOAD_FMT = '{0.len}s'
 
     def __init__(self, bitfield: bytes):
-        super().__init__(1 + len(bitfield), f'{len(bitfield)}s', bitfield)
+        bitfield = _MessageBytes(bitfield)
+        super().__init__(self.BASE_LENGTH + bitfield.len, bitfield)
+
+    @property
+    def bitfield(self) -> bytes:
+        return self.payload[0]
 
 
 class Request(Message):
     MESSAGE_ID = 6
+    BASE_LENGTH = 13
+    PAYLOAD_FMT = '3I'
 
     def __init__(self, index: int, begin: int, length: int):
-        super().__init__(13, '3I', index, begin, length)
+        super().__init__(self.BASE_LENGTH, index, begin, length)
+
+    @property
+    def index(self) -> int:
+        return self.payload[0]
+
+    @property
+    def begin(self) -> int:
+        return self.payload[1]
+
+    @property
+    def length(self) -> int:
+        return self.payload[2]
 
 
 class Piece(Message):
     MESSAGE_ID = 7
+    BASE_LENGTH = 9
+    PAYLOAD_FMT = 'II{2.len}s'
 
     def __init__(self, index: int, begin: int, block: bytes):
-        super().__init__(9 + len(block), f'II{len(block)}s', index, begin, block)
+        block = _MessageBytes(block)
+        super().__init__(self.BASE_LENGTH + block.len, index, begin, block)
+
+    @property
+    def index(self) -> int:
+        return self.payload[0]
+
+    @property
+    def begin(self) -> int:
+        return self.payload[1]
+
+    @property
+    def block(self) -> bytes:
+        return self.payload[2]
 
 
 class Cancel(Message):
     MESSAGE_ID = 8
+    BASE_LENGTH = 13
+    PAYLOAD_FMT = '3I'
 
     def __init__(self, index: int, begin: int, length: int):
-        super().__init__(13, '3I', index, begin, length)
+        super().__init__(self.BASE_LENGTH, index, begin, length)
+
+    @property
+    def index(self) -> int:
+        return self.payload[0]
+
+    @property
+    def begin(self) -> int:
+        return self.payload[1]
+
+    @property
+    def length(self) -> int:
+        return self.payload[2]
 
 
 class Port(Message):
     MESSAGE_ID = 9
+    BASE_LENGTH = 3
+    PAYLOAD_FMT = 'H'
 
     def __init__(self, listen_port):
-        super().__init__(3, 'H', listen_port)
+        super().__init__(self.BASE_LENGTH, listen_port)
+
+    @property
+    def listen_port(self) -> int:
+        return self.payload[0]
 
 
-class _Handshake(Message):
-    def __init__(self, version, reserved, info_hash: bytes, peer_id: bytes):
-        pstr = PROTO_VER_MAP[version]
-        super().__init__(len(pstr), pstr)
+class Handshake(Message):
+    PAYLOAD_FMT = '!B{0.len}sQ20s20s'
 
+    def __init__(self, reserved, info_hash: bytes, peer_id: bytes, version=1):
+        pstr = _MessageBytes(PROTO_VER_MAP[version])
+        super().__init__(pstr.len, pstr, reserved, info_hash, peer_id)
 
-class Handshake:
-    def __init__(self, protocol_name: bytes):
-        self.protocol_name = protocol_name
-        proto_name_len = len(protocol_name)
-        self.__struct = struct.Struct(f'!B{proto_name_len}sQ20s20s')
-
-    def pack(self, reserved: int, info_hash: bytes, peer_id: bytes) -> bytes:
-        return self.__struct.pack(len(self.protocol_name), self.protocol_name,
-                                  reserved, info_hash, peer_id)
-
-    def unpack(self, buf: bytes, peer_id: bytes) -> Tuple[bytes, bytes]:
+    @classmethod
+    def _from_bytes(cls, buf: bytes) -> 'Handshake':
         name_len = buf[0]
-        if name_len != len(self.protocol_name):
-            raise ValueError(f'Unsupported protocol: {buf[1:name_len + 1].decode("ascii", "replace")}')
+        proto_ver = PROTOCOL_VERS.get(name_len)
+        if not proto_ver:
+            raise WrongMessageError(f'Unsupported protocol: {buf[1:name_len + 1].decode("ascii", "replace")}')
 
-        name_len, name, reserved, ih, pid = self.__struct.unpack_from(buf)
-        if pid and peer_id and pid != peer_id:
-            raise ValueError('Unexpected peer_id')
+        return cls(*struct.unpack_from('!Q20s20s', buf, 1 + name_len), proto_ver)
 
-        return pid, reserved
+    def to_bytes(self) -> bytes:
+        return struct.pack(self.PAYLOAD_FMT.format(*self.payload),
+                           self.length_prefix, *self.payload)
+
+    @property
+    def reserved(self):
+        return self.payload[1]
+
+    @property
+    def info_hash(self):
+        return self.payload[2]
+
+    @property
+    def peer_id(self):
+        return self.payload[3]
 
 
 class PeerWireProtocol:
-    PROTOCOL_NAME = b'BitTorrent protocol'  # BitTorrent v1.0
-    HANDSHAKE = Handshake(PROTOCOL_NAME)
-
     def __init__(self, peer_id: bytes, ip: str, port: int):
         self.peer_id = peer_id
         self.addr = ip, port
@@ -216,16 +299,12 @@ class PeerWireProtocol:
             self.sock.close()
             self.sock = None
 
-    def _send(self, data: bytes):
+    def _send_message(self, msg: Message) -> Message:
         if not self.sock:
             self.connect()
 
-        print('send')
-        self.sock.send(data)
-
-    def handshake(self, info_hash: bytes, peer_id: bytes, reserved: int = 0) -> Tuple[bytes, bytes]:
-        req = self.HANDSHAKE.pack(reserved, info_hash, peer_id)
-        self._send(req)
+        print(f'send {msg.__class__.__name__}')
+        self.sock.send(msg.to_bytes())
 
         try:
             resp = self.sock.recv(8192)
@@ -234,12 +313,14 @@ class PeerWireProtocol:
             raise
 
         try:
-            peer_id, reserved = self.HANDSHAKE.unpack(resp, peer_id)
-        except ValueError as e:
+            return Message.from_bytes(resp)
+            # TODO: extended by <reserved & (1 << 20)>
+            #   resp[<msg_len>:]
+        except WrongMessageError as e:
             self.disconnect()
             raise ConnectionAbortedError(e)
 
-        # TODO: extended by <reserved & (1 << 20)>
-        #   resp[struct.calcsize(self.HANDSHAKE_FMT):]
+    def handshake(self, info_hash: bytes, peer_id: bytes, reserved: int = 0) -> Tuple[bytes, bytes]:
+        resp = self._send_message(Handshake(reserved, info_hash, peer_id))
 
-        return peer_id, reserved
+        return resp.peer_id, resp.reserved
