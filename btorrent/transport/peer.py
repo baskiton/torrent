@@ -17,12 +17,6 @@ class UTP:
         pass
 
 
-@enum.unique
-class PeerState(enum.IntEnum):
-    CHOKED = 0
-    INTERESTED = 1
-
-
 PROTOCOL_NAME_v10 = b'BitTorrent protocol'  # BitTorrent v1.0
 PROTOCOL_V10 = 1
 PROTO_VER_MAP = {
@@ -35,6 +29,11 @@ PROTOCOL_VERS = {
 
 class WrongMessageError(ValueError):
     pass
+
+
+class HandshakeError(ConnectionAbortedError):
+    def __init__(self):
+        super().__init__('Unexpected peer_id')
 
 
 class _MessageBytes(bytes):
@@ -68,6 +67,9 @@ class Message:
 
     @classmethod
     def from_bytes(cls, buf: bytes) -> 'Message':
+        if not buf:
+            raise WrongMessageError('No data')
+
         msg_ids = {
             0: Choke,
             1: UnChoke,
@@ -82,16 +84,18 @@ class Message:
         }
         try:
             length, msg_id = struct.unpack_from('!IB', buf)
+            print(f'{length=} {msg_id=}')
         except struct.error:
             msg = KeepAlive
         else:
             msg = msg_ids.get(msg_id, Handshake)
 
+        print(f'build {msg.__name__}')
+
         return msg._from_bytes(buf)
 
     @classmethod
     def _from_bytes(cls, buf: bytes) -> 'Message':
-        # return cls()
         length = struct.unpack_from('!I', buf)[0]
         fmt = cls._RE.sub(cls._SUB, cls.PAYLOAD_FMT).format(length - cls.BASE_LENGTH)
 
@@ -99,6 +103,10 @@ class Message:
 
 
 class KeepAlive(Message):
+    """
+    <len=0000>
+    """
+
     BASE_LENGTH = 0
     PAYLOAD_OFFSET = 0
 
@@ -107,6 +115,10 @@ class KeepAlive(Message):
 
 
 class Choke(Message):
+    """
+    <len=0001><msg_id=0>
+    """
+
     MESSAGE_ID = 0
     BASE_LENGTH = 1
 
@@ -115,6 +127,10 @@ class Choke(Message):
 
 
 class UnChoke(Message):
+    """
+    <len=0001><msg_id=1>
+    """
+
     MESSAGE_ID = 1
     BASE_LENGTH = 1
 
@@ -123,6 +139,10 @@ class UnChoke(Message):
 
 
 class Interested(Message):
+    """
+    <len=0001><msg_id=2>
+    """
+
     MESSAGE_ID = 2
     BASE_LENGTH = 1
 
@@ -131,6 +151,10 @@ class Interested(Message):
 
 
 class NotInterested(Message):
+    """
+    <len=0001><msg_id=3>
+    """
+
     MESSAGE_ID = 3
     BASE_LENGTH = 1
 
@@ -139,6 +163,10 @@ class NotInterested(Message):
 
 
 class Have(Message):
+    """
+    <len=0005><msg_id=4><piece_index=I>
+    """
+
     MESSAGE_ID = 4
     BASE_LENGTH = 5
     PAYLOAD_FMT = 'I'
@@ -152,6 +180,10 @@ class Have(Message):
 
 
 class Bitfield(Message):
+    """
+    <len=0001 + X><msg_id=5><bitfield=?s>
+    """
+
     MESSAGE_ID = 5
     BASE_LENGTH = 1
     PAYLOAD_FMT = '{0.len}s'
@@ -166,6 +198,10 @@ class Bitfield(Message):
 
 
 class Request(Message):
+    """
+    <len=0013><msg_id=6><index=I><begin=I><length=I>
+    """
+
     MESSAGE_ID = 6
     BASE_LENGTH = 13
     PAYLOAD_FMT = '3I'
@@ -187,6 +223,10 @@ class Request(Message):
 
 
 class Piece(Message):
+    """
+    <len=0009 + X><msg_id=7><index=I><begin=I><block=?s>
+    """
+
     MESSAGE_ID = 7
     BASE_LENGTH = 9
     PAYLOAD_FMT = 'II{2.len}s'
@@ -209,6 +249,10 @@ class Piece(Message):
 
 
 class Cancel(Message):
+    """
+    <len=0013><msg_id=8><index=I><begin=I><length=I>
+    """
+
     MESSAGE_ID = 8
     BASE_LENGTH = 13
     PAYLOAD_FMT = '3I'
@@ -230,6 +274,10 @@ class Cancel(Message):
 
 
 class Port(Message):
+    """
+    <len=0003><msg_id=9><listen_port=H>
+    """
+
     MESSAGE_ID = 9
     BASE_LENGTH = 3
     PAYLOAD_FMT = 'H'
@@ -243,9 +291,13 @@ class Port(Message):
 
 
 class Handshake(Message):
+    """
+    <pstr_len=B><pstr=?s><reserved=Q><info_hash=20s><peer_id=20s>
+    """
+
     PAYLOAD_FMT = '!B{0.len}sQ20s20s'
 
-    def __init__(self, reserved, info_hash: bytes, peer_id: bytes, version=1):
+    def __init__(self, reserved: int, info_hash: bytes, peer_id: bytes, version=1):
         pstr = _MessageBytes(PROTO_VER_MAP[version])
         super().__init__(pstr.len, pstr, reserved, info_hash, peer_id)
 
@@ -254,7 +306,9 @@ class Handshake(Message):
         name_len = buf[0]
         proto_ver = PROTOCOL_VERS.get(name_len)
         if not proto_ver:
-            raise WrongMessageError(f'Unsupported protocol: {buf[1:name_len + 1].decode("ascii", "replace")}')
+            # raise WrongMessageError(f'Unsupported protocol: {buf[1:name_len + 1].decode("ascii", "replace")}')
+            raise WrongMessageError(f'Unrecognized Message or Unsupported protocol: '
+                                    f'{buf[:16]}{"..." if len(buf) > 16 else ""}')
 
         return cls(*struct.unpack_from('!Q20s20s', buf, 1 + name_len), proto_ver)
 
@@ -276,20 +330,23 @@ class Handshake(Message):
 
 
 class PeerWireProtocol:
+    KEEP_ALIVE_TIMEOUT = 120
+    KEEP_ALIVE_BIAS = 5
+
     def __init__(self, peer_id: bytes, ip: str, port: int):
         self.peer_id = peer_id
-        self.addr = ip, port
+        self.peer_addr = ip, port
 
         self.sock: Optional[sk.socket] = None
 
     def connect(self):
-        print(f'connect to peer {self.addr}')
-        ipa = ipaddress.ip_address(self.addr[0])
+        print(f'connect to peer {self.peer_addr}')
+        ipa = ipaddress.ip_address(self.peer_addr[0])
         family = sk.AF_INET if ipa.version == 4 else sk.AF_INET6
         self.sock = sk.socket(family, sk.SOCK_STREAM)
         self.sock.settimeout(5)
         try:
-            self.sock.connect(self.addr)
+            self.sock.connect(self.peer_addr)
         except sk.error:
             self.disconnect()
             raise
@@ -307,7 +364,8 @@ class PeerWireProtocol:
         self.sock.send(msg.to_bytes())
 
         try:
-            resp = self.sock.recv(8192)
+            resp = self.sock.recv(65536)
+            print(f'received {len(resp)} bytes')
         except sk.error:
             self.disconnect()
             raise
@@ -320,7 +378,28 @@ class PeerWireProtocol:
             self.disconnect()
             raise ConnectionAbortedError(e)
 
-    def handshake(self, info_hash: bytes, peer_id: bytes, reserved: int = 0) -> Tuple[bytes, bytes]:
-        resp = self._send_message(Handshake(reserved, info_hash, peer_id))
+    def handshake(self, info_hash: bytes, client_peer_id: bytes, reserved: int = 0) -> Tuple[bytes, bytes]:
+        resp = self._send_message(Handshake(reserved, info_hash, client_peer_id))
+
+        if self.peer_id and resp.peer_id and self.peer_id == resp.peer_id:
+            self.disconnect()
+            raise HandshakeError
 
         return resp.peer_id, resp.reserved
+
+    def bitfield(self, bitfield: bytes):
+        return self._send_message(Bitfield(bitfield))
+
+    def run(self, reserved: int, info_hash: bytes, client_peer_id: bytes, bitfield: bytes):
+        resp = self._send_message(Handshake(reserved, info_hash, client_peer_id))
+
+        if self.peer_id and resp.peer_id and self.peer_id == resp.peer_id:
+            self.disconnect()
+            raise HandshakeError
+
+        # TODO: save actual peer_id and reserved
+
+        resp = self._send_message(Bitfield(bitfield))
+        # TODO: save received bitfield
+
+        # TODO: ...

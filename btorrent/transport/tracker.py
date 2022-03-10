@@ -294,21 +294,22 @@ class AnnounceResponse(Response):
     _RESP_LEN = struct.calcsize(_RESP_FMT)
     _PEER_FMT = '!IH'
 
-    def __init__(self, interval: int, leechers: int, seeders: int, peers: List[btorrent.Peer] = None) -> None:
+    def __init__(self, interval: int, leechers: int, seeders: int, peers: List[Tuple] = None) -> None:
         self.interval = interval
         self.leechers = leechers
         self.seeders = seeders
-        self.peers: List[btorrent.Peer] = peers or []
+        self.peers: List[Tuple[AnyStr, int, bytes]] = peers or []
         self.tracker_id = b''
 
     @classmethod
     def from_buf(cls, buf: io.BytesIO) -> Optional['AnnounceResponse']:
         x = buf.read(cls._RESP_LEN)
         if len(x) >= cls._RESP_LEN:
-            resp = cls(*struct.unpack(cls._RESP_FMT, x))
-            for ip, port in struct.iter_unpack(cls._PEER_FMT, buf.read()):
-                resp.peers.append(btorrent.Peer(ip, port))
-            return resp
+            # resp = cls(*struct.unpack(cls._RESP_FMT, x), peers=list(struct.iter_unpack(cls._PEER_FMT, buf.read())))
+            # for peer_addr in struct.iter_unpack(cls._PEER_FMT, buf.read()):
+            #     resp.peers.append(peer_addr)
+            return cls(*struct.unpack(cls._RESP_FMT, x),
+                       peers=list(struct.iter_unpack(cls._PEER_FMT, buf.read())))
 
     @classmethod
     def from_bencode(cls, data: dict) -> Optional['AnnounceResponse']:
@@ -321,12 +322,10 @@ class AnnounceResponse(Response):
         peers = data.get(b'peers')
         if isinstance(peers, bytes):
             # compact model
-            resp.peers = list(btorrent.Peer(ip, port)
-                              for ip, port in struct.iter_unpack('!IH', peers))
+            resp.peers = list(struct.iter_unpack('!IH', peers))
         elif isinstance(peers, list):
             # dictionary model
-            resp.peers = list(btorrent.Peer(peer[b'ip'], peer[b'port'], peer.get(b'peer id'))
-                              for peer in peers)
+            resp.peers = [(peer[b'ip'], peer[b'port'], peer.get(b'peer id', b'')) for peer in peers]
 
         return resp
 

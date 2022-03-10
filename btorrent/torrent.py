@@ -1,5 +1,6 @@
 import pathlib
 import random
+import select
 import time
 
 from typing import Any, Callable, List, Set, Union
@@ -48,16 +49,29 @@ class Torrent:
     def __eq__(self, other: 'Torrent') -> bool:
         return self.info_hash == other.info_hash
 
-    def start_download(self, peer_id: bytes, port: int, udp_port: int, num_want: int, ip: str = 0):
+    def _get_actual_peers(self):
+        return [peer
+                for peer in self.peers
+                if (peer.fileno() > -1 and not peer.destroyed)]
+
+    def start_download(self, peer_id: bytes, port: int, udp_port: int, num_want: int, ip: str = 0, reserved=0):
         # TODO: STARTED is sent when a download first begins
         event = btorrent.tracker.transport.AnnounceEvent.STARTED
 
         self._announce(event, peer_id, port, udp_port, num_want, ip)
+
+        for peer in self.peers:
+            peer.connect()
+            peer.do_handshake(self.info_hash, peer_id, reserved)
+
+        for peer in select.select(self._get_actual_peers(), [], [], None)[0]:
+            print(peer.sock.recv(8192))
+
         # TODO: ...
 
     def stop_download(self, peer_id: bytes, port: int, udp_port: int, ip: str = 0):
         for peer in self.peers:
-            peer.connection.disconnect()
+            peer.disconnect()
 
         self._announce(btorrent.tracker.transport.AnnounceEvent.STOPPED, peer_id, port, udp_port, 0, ip)
 
@@ -97,8 +111,10 @@ class Torrent:
             # key=key,
         )
         if response is not None:
-            self.last_connecting_time = time.time()
+            self.last_connecting_time = time.monotonic()
             self.interval = response.interval
             self.seeders = response.seeders
             self.leechers = response.leechers
-            self.peers.update(response.peers)   # `peer` is not added if already in `self.peers`
+
+            # `peer` is not added if already in `self.peers`
+            self.peers.update(map(lambda x: btorrent.Peer(*x), response.peers))
