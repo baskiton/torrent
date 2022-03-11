@@ -1,4 +1,5 @@
 import enum
+import io
 import ipaddress
 import re
 import struct
@@ -64,6 +65,17 @@ class Message:
         args.extend(self.payload)
 
         return struct.pack(''.join(fmt), *args)
+
+    @classmethod
+    def from_buf(cls, buf: io.BytesIO, buf_size: int) -> Optional['Message']:
+        len_prefix = int.from_bytes(buf.read(4), 'big')
+        total_len = 4 + len_prefix
+
+        if buf_size < total_len:
+            return
+
+        buf.seek(-4, io.SEEK_CUR)
+        return cls.from_bytes(buf.read(total_len))
 
     @classmethod
     def from_bytes(cls, buf: bytes) -> 'Message':

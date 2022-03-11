@@ -5,6 +5,8 @@ import time
 
 from typing import Any, Callable, List, Set, Union
 
+import bitstring
+
 import btorrent
 
 
@@ -20,11 +22,12 @@ class Torrent:
         self.uploaded = 0
         self.downloaded = 0
         self.left = tfile.total_size
+        self.bitfield = bitstring.BitArray(tfile.metadata.info.pieces_amount)
 
         self.seeders = 0
         self.leechers = 0
         self.interval = 0
-        self.last_connecting_time = 0
+        self.last_announce_time = 0
 
         if tfile.metadata.announce_list:
             for lvl in tfile.metadata.announce_list:
@@ -49,34 +52,8 @@ class Torrent:
     def __eq__(self, other: 'Torrent') -> bool:
         return self.info_hash == other.info_hash
 
-    def _get_actual_peers(self):
-        return [peer
-                for peer in self.peers
-                if (peer.fileno() > -1 and not peer.destroyed)]
-
-    def start_download(self, peer_id: bytes, port: int, udp_port: int, num_want: int, ip: str = 0, reserved=0):
-        # TODO: STARTED is sent when a download first begins
-        event = btorrent.tracker.transport.AnnounceEvent.STARTED
-
-        self._announce(event, peer_id, port, udp_port, num_want, ip)
-
-        for peer in self.peers:
-            peer.connect()
-            peer.do_handshake(self.info_hash, peer_id, reserved)
-
-        for peer in select.select(self._get_actual_peers(), [], [], None)[0]:
-            print(peer.sock.recv(8192))
-
-        # TODO: ...
-
-    def stop_download(self, peer_id: bytes, port: int, udp_port: int, ip: str = 0):
-        for peer in self.peers:
-            peer.disconnect()
-
-        self._announce(btorrent.tracker.transport.AnnounceEvent.STOPPED, peer_id, port, udp_port, 0, ip)
-
-    def pause_download(self):
-        pass
+    def add_peer(self, peer: btorrent.Peer):
+        self.peers.add(peer)
 
     def _send_request(self, trt_meth: Callable, **params) -> Any:
         for lvl in self.announce_list:
@@ -94,8 +71,8 @@ class Torrent:
                     lvl.insert(0, tracker)
                     return result
 
-    def _announce(self, event: btorrent.tracker.transport.AnnounceEvent, peer_id: bytes,
-                  port: int, udp_port: int, num_want: int, ip: str = 0) -> None:
+    def announce(self, event: btorrent.tracker.transport.AnnounceEvent, peer_id: bytes,
+                 port: int, udp_port: int, num_want: int, ip: str = 0) -> None:
         response: btorrent.tracker.transport.AnnounceResponse = self._send_request(
             btorrent.tracker.Tracker.announce,
             event=event,
@@ -111,7 +88,7 @@ class Torrent:
             # key=key,
         )
         if response is not None:
-            self.last_connecting_time = time.monotonic()
+            self.last_announce_time = time.monotonic()
             self.interval = response.interval
             self.seeders = response.seeders
             self.leechers = response.leechers
