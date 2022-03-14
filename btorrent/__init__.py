@@ -8,4 +8,5 @@ from .peer import Peer
 from .torrentfile import TorrentFile
 from .tracker import Tracker
 from .torrent import Torrent
+from .torrent_manager import TorrentManager
 from .client import Config, Client

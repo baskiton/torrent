@@ -2,7 +2,7 @@ import select
 import threading
 import time
 
-from typing import Generator
+from typing import Any, Generator, Optional
 
 import btorrent
 
@@ -22,12 +22,15 @@ class TorrentManager(threading.Thread):
     def add_peer(self, peer: btorrent.Peer):
         self.torrent.add_peer(peer)
 
-    def _get_actual_peers(self) -> Generator[btorrent.Peer]:
+    def _get_actual_peers(self) -> Generator[Optional[btorrent.Peer], Any, None]:
         return (peer
                 for peer in self.torrent.peers
                 if (peer.fileno() > -1 and not peer.destroyed))
 
     def _handle_message(self, peer: btorrent.Peer, msg: btorrent.peer.transport.Message) -> None:
+        print(f'{peer} handle {msg.__class__.__name__}')
+        # TODO: check that this message is not a response for us
+
         if isinstance(msg, btorrent.peer.transport.KeepAlive):
             peer.do_keep_alive()
         elif isinstance(msg, btorrent.peer.transport.Handshake):

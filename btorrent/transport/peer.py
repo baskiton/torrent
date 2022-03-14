@@ -33,8 +33,7 @@ class WrongMessageError(ValueError):
 
 
 class HandshakeError(ConnectionAbortedError):
-    def __init__(self):
-        super().__init__('Unexpected peer_id')
+    pass
 
 
 class _MessageBytes(bytes):
@@ -67,18 +66,29 @@ class Message:
         return struct.pack(''.join(fmt), *args)
 
     @classmethod
-    def from_buf(cls, buf: io.BytesIO, buf_size: int) -> Optional['Message']:
-        len_prefix = int.from_bytes(buf.read(4), 'big')
-        total_len = 4 + len_prefix
-
-        if buf_size < total_len:
+    def from_buf(cls, buf: io.BytesIO, handshaked=False) -> Optional['Message']:
+        cur_pos = buf.tell()
+        len_prefix = buf.read(4)
+        buf.seek(-len(len_prefix), io.SEEK_CUR)
+        if len(len_prefix) < 4:
             return
 
-        buf.seek(-4, io.SEEK_CUR)
-        return cls.from_bytes(buf.read(total_len))
+        try:
+            result = cls.from_bytes(buf.read(), handshaked)
+        except WrongMessageError:
+            buf.seek(cur_pos + 4 + int.from_bytes(len_prefix, 'big'), io.SEEK_SET)
+            raise
+
+        if isinstance(result, Handshake):
+            total_len = 1 + result.length_prefix + 8 + 20 + 20
+        else:
+            total_len = 4 + result.length_prefix
+        buf.seek(cur_pos + total_len, io.SEEK_SET)
+
+        return result
 
     @classmethod
-    def from_bytes(cls, buf: bytes) -> 'Message':
+    def from_bytes(cls, buf: bytes, handshaked=False) -> 'Message':
         if not buf:
             raise WrongMessageError('No data')
 
@@ -96,13 +106,15 @@ class Message:
         }
         try:
             length, msg_id = struct.unpack_from('!IB', buf)
-            print(f'{length=} {msg_id=}')
         except struct.error:
             msg = KeepAlive
         else:
-            msg = msg_ids.get(msg_id, Handshake)
-
-        print(f'build {msg.__name__}')
+            msg = msg_ids.get(msg_id)
+            if msg is None:
+                if handshaked:
+                    raise WrongMessageError(f'Unrecognized Message: '
+                                            f'{buf[:16]}{"..." if len(buf) > 16 else ""}')
+                msg = Handshake
 
         return msg._from_bytes(buf)
 
@@ -318,9 +330,8 @@ class Handshake(Message):
         name_len = buf[0]
         proto_ver = PROTOCOL_VERS.get(name_len)
         if not proto_ver:
-            # raise WrongMessageError(f'Unsupported protocol: {buf[1:name_len + 1].decode("ascii", "replace")}')
-            raise WrongMessageError(f'Unrecognized Message or Unsupported protocol: '
-                                    f'{buf[:16]}{"..." if len(buf) > 16 else ""}')
+            raise HandshakeError(f'Unsupported protocol: '
+                                 f'{buf[:16]}{"..." if len(buf) > 16 else ""}')
 
         return cls(*struct.unpack_from('!Q20s20s', buf, 1 + name_len), proto_ver)
 
@@ -395,23 +406,9 @@ class PeerWireProtocol:
 
         if self.peer_id and resp.peer_id and self.peer_id == resp.peer_id:
             self.disconnect()
-            raise HandshakeError
+            raise HandshakeError('Unexpected peer_id')
 
         return resp.peer_id, resp.reserved
 
     def bitfield(self, bitfield: bytes):
         return self._send_message(Bitfield(bitfield))
-
-    def run(self, reserved: int, info_hash: bytes, client_peer_id: bytes, bitfield: bytes):
-        resp = self._send_message(Handshake(reserved, info_hash, client_peer_id))
-
-        if self.peer_id and resp.peer_id and self.peer_id == resp.peer_id:
-            self.disconnect()
-            raise HandshakeError
-
-        # TODO: save actual peer_id and reserved
-
-        resp = self._send_message(Bitfield(bitfield))
-        # TODO: save received bitfield
-
-        # TODO: ...

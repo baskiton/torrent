@@ -7,7 +7,7 @@ import ipaddress
 import socket as sk
 import time
 
-from typing import AnyStr, Generator, Optional, Union
+from typing import Any, AnyStr, Generator, Optional, Union
 
 import btorrent.transport.peer as transport
 
@@ -32,6 +32,7 @@ class Peer:
             'peer_interested': False,
         }
         self.sock: Optional[sk.socket] = None
+        self.read_buffer = io.BytesIO()
         self.last_connecting_time = 0
 
     @property
@@ -141,6 +142,7 @@ class Peer:
         if self.destroyed or not (force or self.handshaked):
             return
 
+        print(f'{self} send {msg.__class__.__name__}')
         try:
             self.sock.send(msg.to_bytes())
             self.last_connecting_time = time.monotonic()
@@ -159,32 +161,43 @@ class Peer:
         if not self.bitfielded:
             self.send_message(transport.Bitfield(bitfield.tobytes()))
 
-    def _recv(self) -> io.BytesIO:
-        buf = io.BytesIO()
-
+    def _recv(self):
         while True:
             try:
                 x = self.sock.recv(8192)
                 if not x:
                     break
-                buf.write(x)
+                self.read_buffer.write(x)
             except sk.error as e:
                 if e.errno not in (errno.EAGAIN, errno.EWOULDBLOCK):
                     # TODO: log it
                     print(f'Recv from {self} failed: {e}')
                 break
 
-        return buf
+    def get_message(self) -> transport.Message:
+        self._recv()
+        full_sz = est_sz = self.read_buffer.tell()
+        self.read_buffer.seek(0)
 
-    def get_message(self) -> Generator[transport.Message]:
-        buf = self._recv()
-        sz = buf.tell()
-        buf.seek(0)
-
-        while sz > 4 and not self.destroyed:
+        while est_sz >= 4 and not self.destroyed:
             try:
-                yield transport.Message.from_buf(buf, sz)
-            except (transport.WrongMessageError, struct.error) as e:
-                # TODO: log it
-                print(f'Getting message from {self} failed: {e}')
+                res = transport.Message.from_buf(self.read_buffer, self.handshaked)
+                if not res:
+                    break
+                yield res
+                est_sz = full_sz - self.read_buffer.tell()
+            except struct.error:
+                self.read_buffer.seek(-est_sz, io.SEEK_END)
                 break
+            except transport.HandshakeError as e:
+                # TODO: log it
+                print(f'{self} failed: {e}')
+                self.disconnect()
+                return
+            except transport.WrongMessageError as e:
+                # TODO: log it
+                print(f'{self} failed: {e}')
+                est_sz = full_sz - self.read_buffer.tell()
+
+        self.read_buffer = io.BytesIO(self.read_buffer.read())
+        self.read_buffer.seek(0, io.SEEK_END)

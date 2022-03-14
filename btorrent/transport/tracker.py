@@ -508,7 +508,7 @@ class UDPConnection:
                 resp = con.recv(65535)
             except sk.timeout:
                 # TODO: log it
-                print(f'send {req.ACTION.name} {t=}')
+                print(f'send {req.ACTION.name} t={t}')
                 continue
 
             resp = Response.build(resp, req.transaction_id)
