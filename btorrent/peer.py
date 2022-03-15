@@ -143,13 +143,16 @@ class Peer:
             return
 
         print(f'{self} send {msg.__class__.__name__}')
+        x = 0
         try:
-            self.sock.send(msg.to_bytes())
+            x = self.sock.send(msg.to_bytes())
             self.last_connecting_time = time.monotonic()
         except (sk.error, Exception) as e:
             # TODO: log it
             print(f'Failed to send {msg.__class__.__name__} to {self}: {e}')
             self.destroyed = True
+
+        return x
 
     def do_keep_alive(self):
         self.send_message(transport.KeepAlive())
@@ -160,6 +163,14 @@ class Peer:
     def do_bitfield(self, bitfield: bitstring.BitArray):
         if not self.bitfielded:
             self.send_message(transport.Bitfield(bitfield.tobytes()))
+
+    def do_interested(self):
+        if self.peer_choking and not self.am_interested and self.send_message(transport.Interested()):
+            self.am_interested = True
+
+    def do_unchoke(self):
+        if self.am_choking:
+            self.send_message(transport.UnChoke())
 
     def _recv(self):
         while True:

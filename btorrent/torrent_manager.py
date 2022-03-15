@@ -2,6 +2,7 @@ import select
 import threading
 import time
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Generator, Optional
 
 import btorrent
@@ -33,6 +34,7 @@ class TorrentManager(threading.Thread):
 
         if isinstance(msg, btorrent.peer.transport.KeepAlive):
             peer.do_keep_alive()
+
         elif isinstance(msg, btorrent.peer.transport.Handshake):
             if peer.peer_id and msg.peer_id and (peer.peer_id != msg.peer_id):
                 # TODO: log it
@@ -42,26 +44,39 @@ class TorrentManager(threading.Thread):
                 peer.reserved = msg.reserved
                 peer.handshaked = True
                 peer.do_bitfield(self.torrent.bitfield)
+
         elif isinstance(msg, btorrent.peer.transport.Choke):
-            pass
+            peer.peer_choking = True
+
         elif isinstance(msg, btorrent.peer.transport.UnChoke):
-            pass
+            peer.peer_choking = False
+
         elif isinstance(msg, btorrent.peer.transport.Interested):
-            pass
+            peer.peer_interested = True
+            peer.do_unchoke()
+
         elif isinstance(msg, btorrent.peer.transport.NotInterested):
-            pass
+            peer.peer_interested = False
+
         elif isinstance(msg, btorrent.peer.transport.Have):
-            pass
+            peer.bitfield[msg.piece_index] = 1
+
         elif isinstance(msg, btorrent.peer.transport.Bitfield):
             if not peer.bitfielded:
                 peer.bitfield = msg.bitfield
                 peer.bitfielded = True
+            # peer.bitfield = msg.bitfield
+            # peer.do_interested()
+
         elif isinstance(msg, btorrent.peer.transport.Request):
             pass
+
         elif isinstance(msg, btorrent.peer.transport.Piece):
             pass
+
         elif isinstance(msg, btorrent.peer.transport.Cancel):
             pass
+
         elif isinstance(msg, btorrent.peer.transport.Port):
             pass
 
@@ -69,7 +84,7 @@ class TorrentManager(threading.Thread):
         self._start_download()
 
         while self.is_active:
-            for peer in select.select(self._get_actual_peers(), [], [], None)[0]:
+            for peer in select.select(self._get_actual_peers(), [], [], 1)[0]:
                 for msg in peer.get_message():
                     self._handle_message(peer, msg)
             self._announce(btorrent.tracker.transport.AnnounceEvent.NONE, self.num_want)
@@ -87,9 +102,14 @@ class TorrentManager(threading.Thread):
         # TODO: STARTED is sent when a download first begins, but...
         self._announce(btorrent.tracker.transport.AnnounceEvent.STARTED, self.num_want)
 
-        for peer in self.torrent.peers:
-            peer.connect()
-            peer.do_handshake(self.torrent.info_hash, self.client_peer_id, self.reserved, True)
+        with ThreadPoolExecutor() as pool:
+            pool.map(
+                lambda peer: (
+                    peer.connect(),
+                    peer.do_handshake(self.torrent.info_hash, self.client_peer_id, self.reserved, True)
+                ),
+                self.torrent.peers
+            )
 
     def _stop_download(self) -> None:
         for peer in self.torrent.peers:
